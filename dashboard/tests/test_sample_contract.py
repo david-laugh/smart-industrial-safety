@@ -103,3 +103,15 @@ def test_dedup_key_follows_protocol(sample_rows):
         d = row["event_payload"]["decision"]
         assert pattern.match(d["dedup_key"]), d["dedup_key"]
         assert int(d["dedup_key"].rsplit("|", 1)[1]) % d["dedup_window_s"] == 0
+
+
+def test_one_event_per_person_and_shared_frames(sample_rows):
+    by_frame = {}
+    for row in sample_rows:
+        assert row["violation_count"] == 1 and len(row["event_payload"]["violations"]) == 1
+        by_frame.setdefault(row["event_payload"]["frame_id"], []).append(row)
+    multi = [g for g in by_frame.values() if len(g) > 1]
+    assert multi
+    for group in multi:
+        assert len({r["image_sha256"] for r in group}) == 1
+        assert len({r["storage_path"] for r in group}) == len(group)

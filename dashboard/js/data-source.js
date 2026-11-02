@@ -2,8 +2,9 @@
 //
 //   listDevices()                        → string[]
 //   listEvents(filter, { offset, limit }) → { rows, total }
-//   listStats(filter)                     → 요약/차트용 경량 행 [{ occurred_at, device_id, violation_types, violation_count }]
+//   listStats(filter)                     → 요약/차트용 경량 행 [{ occurred_at, device_id, violation_types, violation_count, frame_id }]
 //   getEvent(eventId)                     → row | null
+//   listFrameEvents(frameId)              → 같은 프레임(event_payload.frame_id)에서 나온 이벤트들
 //   getSignedImageUrl(row)                → { url, expiresAt }
 //   subscribe(onInsert)                   → unsubscribe()
 //
@@ -50,11 +51,15 @@
               device_id: r.device_id,
               violation_types: r.violation_types,
               violation_count: r.violation_count,
+              frame_id: r.event_payload.frame_id,
             }))
         );
       },
       async getEvent(id) {
         return delay(rows.find((r) => r.event_id === id) || null);
+      },
+      async listFrameEvents(frameId) {
+        return delay(rows.filter((r) => r.event_payload.frame_id === frameId));
       },
       async getSignedImageUrl(row) {
         return delay({
@@ -64,9 +69,10 @@
       },
       subscribe(onInsert) {
         const timer = setInterval(() => {
-          const row = PPE.sampleData.generateLive(liveRand, Date.now());
-          rows.unshift(row);
-          onInsert(row);
+          for (const row of PPE.sampleData.generateLive(liveRand, Date.now())) {
+            rows.unshift(row);
+            onInsert(row);
+          }
         }, cfg.sample.liveIntervalMs);
         return () => clearInterval(timer);
       },
@@ -125,13 +131,18 @@
       },
       async listStats(f) {
         // TODO(C): 행이 많아지면 집계 RPC/뷰로 교체. 지금은 경량 컬럼만 최대 5000행 조회.
-        let q = sb.from(cfg.table).select("occurred_at,device_id,violation_types,violation_count");
+        let q = sb.from(cfg.table).select("occurred_at,device_id,violation_types,violation_count,frame_id:event_payload->>frame_id");
         q = applyFilter(q, f).order("occurred_at", { ascending: false }).limit(5000);
         const res = check(await q);
         return res.data;
       },
       async getEvent(id) {
         const res = check(await sb.from(cfg.table).select("*").eq("event_id", id).maybeSingle());
+        return res.data;
+      },
+      async listFrameEvents(frameId) {
+        // TODO(C): 행이 많아지면 (event_payload->>'frame_id') 식 인덱스 추가 검토
+        const res = check(await sb.from(cfg.table).select("*").eq("event_payload->>frame_id", frameId).limit(64));
         return res.data;
       },
       async getSignedImageUrl(row) {

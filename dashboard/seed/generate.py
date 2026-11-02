@@ -4,6 +4,8 @@
 - event_payload: ppe-event
 - 규칙: docs/protocols.md §시간 규칙(occurred_at 결정), §중복 방지(dedup_key), §ID 규칙(UUIDv7),
         cloud/README.md §2(storage_path)
+- 위반자 1명 = 이벤트 1건(dedup_key 가 사람 1명 기준, B 파트 결정). 한 프레임에 위반자가 여럿이면
+  같은 frame_id·같은 JPEG 로 이벤트가 여러 건 생기고, Storage 에는 event_id 경로마다 같은 JPEG 가 저장된다.
 """
 
 import hashlib
@@ -67,14 +69,19 @@ def _item(rng, missing):
     return {"status": "WORN", "confidence": round(rng.uniform(0.6, 0.98), 2)}
 
 
-def _violations(rng):
-    people = 1 if rng.random() < 0.7 else (2 if rng.random() < 0.75 else 3)
-    slot = 1 / people
+def _people(rng):
+    """프레임 속 사람들. 위반자(violation_types 비어 있지 않음)가 최소 1명, 나머지는 준수자일 수 있다."""
+    n = 1 if rng.random() < 0.6 else (2 if rng.random() < 0.7 else 3)
+    slot = 1 / n
+    violator = rng.randrange(n)  # 최소 1명 보장
     out = []
-    for i in range(people):
-        r = rng.random()
-        helmet_missing = r < 0.55 or r >= 0.85
-        vest_missing = r >= 0.55
+    for i in range(n):
+        if i != violator and rng.random() < 0.4:
+            helmet_missing = vest_missing = False  # 준수자(이벤트 없음, 이미지에만 등장)
+        else:
+            r = rng.random()
+            helmet_missing = r < 0.55 or r >= 0.85
+            vest_missing = r >= 0.55
         w = min(slot * 0.75, rng.uniform(0.16, 0.28))
         h = rng.uniform(0.55, 0.9)
         x0 = i * slot + rng.random() * (slot - w)
@@ -98,7 +105,7 @@ def _violations(rng):
     return out
 
 
-def render_jpeg(device_id, occurred_iso, violations):
+def render_jpeg(device_id, occurred_iso, people):
     """bbox 위치에 작업자를 그린 640x480 증거 JPEG."""
     img = Image.new("RGB", (IMAGE_W, IMAGE_H), (138, 144, 151))
     d = ImageDraw.Draw(img)
@@ -108,7 +115,7 @@ def render_jpeg(device_id, occurred_iso, violations):
     d.rectangle([430, int(IMAGE_H * 0.26), 600, floor_y], fill=(123, 129, 135))
     for x in range(0, IMAGE_W, 46):
         d.rectangle([x, int(IMAGE_H * 0.855), x + 28, int(IMAGE_H * 0.865)], fill=(217, 180, 0))
-    for v in violations:
+    for v in people:
         b = v["bbox"]
         x, y = b["x_min"] * IMAGE_W, b["y_min"] * IMAGE_H
         w, h = (b["x_max"] - b["x_min"]) * IMAGE_W, (b["y_max"] - b["y_min"]) * IMAGE_H
@@ -137,8 +144,11 @@ def render_jpeg(device_id, occurred_iso, violations):
     return buf.getvalue()
 
 
-def make_event(rng, occurred_target, device_id):
-    """(row, jpeg_bytes). occurred_target 은 대략적 촬영 시각."""
+def make_frame_events(rng, occurred_target, device_id):
+    """프레임 1장 → 위반자마다 이벤트 1건 [(row, jpeg_bytes), ...]. occurred_target 은 대략적 촬영 시각.
+
+    같은 프레임의 이벤트는 frame_id·boot_id·frame_seq·시각·JPEG(sha256)를 공유하고 event_id·violations·dedup_key 만 다르다.
+    """
     gateway = occurred_target + timedelta(milliseconds=rng.uniform(40, 200))
     decided = gateway + timedelta(milliseconds=rng.uniform(300, 1500))
     r = rng.random()
@@ -154,70 +164,83 @@ def make_event(rng, occurred_target, device_id):
     else:
         occurred, source = gateway, "GATEWAY_RECEIVED"
 
-    event_id = uuid7(rng, decided)
-    violations = _violations(rng)
-    types = sorted({t for v in violations for t in v["violation_types"]})
+    people = _people(rng)
     occurred_iso = utc_iso(occurred)
-    jpeg = render_jpeg(device_id, occurred_iso, violations)
+    jpeg = render_jpeg(device_id, occurred_iso, people)
     sha = hashlib.sha256(jpeg).hexdigest()
     day = occurred.astimezone(timezone.utc).strftime("%Y/%m/%d")
-
-    payload = {
-        "schema_version": "1.0.0",
-        "event_id": event_id,
-        "event_type": "PPE_VIOLATION",
-        "device_id": device_id,
+    frame = {
         "frame_id": uuid7(rng, gateway),
         "boot_id": f"{rng.getrandbits(32):08x}",
         "frame_seq": rng.randrange(200000),
-        "timestamps": {
-            "occurred_at_utc": occurred_iso,
+        "mcu_uptime_ms": rng.randrange(86_400_000),
+        "frames_considered": rng.randint(3, 5),
+    }
+    model = {**MODEL, "sha256": hashlib.sha256(f"{MODEL['name']}:{MODEL['version']}".encode()).hexdigest()}
+
+    events = []
+    for person in (p for p in people if p["violation_types"]):
+        event_id = uuid7(rng, decided)
+        payload = {
+            "schema_version": "1.0.0",
+            "event_id": event_id,
+            "event_type": "PPE_VIOLATION",
+            "device_id": device_id,
+            "frame_id": frame["frame_id"],
+            "boot_id": frame["boot_id"],
+            "frame_seq": frame["frame_seq"],
+            "timestamps": {
+                "occurred_at_utc": occurred_iso,
+                "occurred_at_source": source,
+                "capture_ts_utc": utc_iso(capture) if capture else None,
+                "mcu_uptime_ms": frame["mcu_uptime_ms"],
+                "gateway_received_at_utc": utc_iso(gateway),
+                "gateway_clock_synced": True,
+                "decided_at_utc": utc_iso(decided),
+            },
+            "violations": [person],
+            "image": {
+                "image_path": f"images/{day}/{event_id}.jpg",
+                "content_type": "image/jpeg",
+                "byte_length": len(jpeg),
+                "sha256": sha,
+                "width": IMAGE_W,
+                "height": IMAGE_H,
+            },
+            "model": model,
+            "decision": {
+                "policy_version": "0.1.0",
+                "dedup_key": dedup_key(device_id, person, occurred),
+                "dedup_window_s": DEDUP_WINDOW_S,
+                "frames_considered": frame["frames_considered"],
+            },
+        }
+        row = {
+            "event_id": event_id,
+            "schema_version": "1.0.0",
+            "device_id": device_id,
+            "occurred_at": occurred_iso,
             "occurred_at_source": source,
-            "capture_ts_utc": utc_iso(capture) if capture else None,
-            "mcu_uptime_ms": rng.randrange(86_400_000),
-            "gateway_received_at_utc": utc_iso(gateway),
-            "gateway_clock_synced": True,
-            "decided_at_utc": utc_iso(decided),
-        },
-        "violations": violations,
-        "image": {
-            "image_path": f"images/{day}/{event_id}.jpg",
-            "content_type": "image/jpeg",
-            "byte_length": len(jpeg),
-            "sha256": sha,
-            "width": IMAGE_W,
-            "height": IMAGE_H,
-        },
-        "model": {**MODEL, "sha256": hashlib.sha256(f"{MODEL['name']}:{MODEL['version']}".encode()).hexdigest()},
-        "decision": {
-            "policy_version": "0.1.0",
-            "dedup_key": dedup_key(device_id, violations[0], occurred),
-            "dedup_window_s": DEDUP_WINDOW_S,
-            "frames_considered": rng.randint(3, 5),
-        },
-    }
-    row = {
-        "event_id": event_id,
-        "schema_version": "1.0.0",
-        "device_id": device_id,
-        "occurred_at": occurred_iso,
-        "occurred_at_source": source,
-        "gateway_received_at": utc_iso(gateway),
-        "decided_at": utc_iso(decided),
-        "violation_count": len(violations),
-        "violation_types": types,
-        "storage_bucket": BUCKET,
-        "storage_path": f"{device_id}/{day}/{event_id}.jpg",
-        "image_sha256": sha,
-        "model_name": MODEL["name"],
-        "model_version": MODEL["version"],
-        "event_payload": payload,
-    }
-    return row, jpeg
+            "gateway_received_at": utc_iso(gateway),
+            "decided_at": utc_iso(decided),
+            "violation_count": 1,
+            "violation_types": sorted(person["violation_types"]),
+            "storage_bucket": BUCKET,
+            "storage_path": f"{device_id}/{day}/{event_id}.jpg",
+            "image_sha256": sha,
+            "model_name": MODEL["name"],
+            "model_version": MODEL["version"],
+            "event_payload": payload,
+        }
+        events.append((row, jpeg))
+    return events
 
 
 def generate(count, days, seed, now=None):
-    """근무 시간대(UTC+9 07~19시)에 몰린 count 건, occurred_at 오래된 순(업로드 순서)."""
+    """근무 시간대(UTC+9 07~19시)에 몰린 이벤트 count 건, occurred_at 오래된 순(업로드 순서).
+
+    프레임 단위로 만들기 때문에 마지막 프레임의 이벤트 일부가 잘릴 수 있다(count 를 정확히 맞춤).
+    """
     rng = random.Random(seed)
     now = now or datetime.now(timezone.utc)
     events = []
@@ -226,8 +249,9 @@ def generate(count, days, seed, now=None):
         local_hour = (t.hour + 9) % 24
         if not (7 <= local_hour < 19) and rng.random() > 0.12:
             continue
-        events.append(make_event(rng, t, rng.choice(DEVICES)))
-    events.sort(key=lambda e: e[0]["occurred_at"])
+        events.extend(make_frame_events(rng, t, rng.choice(DEVICES)))
+    events = events[:count]
+    events.sort(key=lambda e: (e[0]["occurred_at"], e[0]["event_id"]))
     return events
 
 

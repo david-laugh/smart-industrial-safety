@@ -18,6 +18,7 @@ python -m venv .venv
 - 로그인 화면 없음(바로 조회). 비인증 접근 차단(SYS-SEC-01)은 요청 토큰(apikey/Bearer)과 RLS로 판단
 - 이벤트 목록: 기간, 장치, 위반 유형 필터, `occurred_at` 내림차순
 - 이벤트 상세: 증거 이미지(Signed URL), bbox 오버레이, 사람별 helmet/vest 상태와 신뢰도, 시간 정보(`occurred_at_source` 표시)
+- 같은 프레임의 다른 위반: 같은 `frame_id` 이벤트를 상세 화면에 링크로 표시하고 이미지 위에 점선 bbox로 겹쳐 그림
 - 읽기 전용 (이벤트 수정/삭제 기능 없음)
 
 ## 데이터 소스
@@ -190,6 +191,7 @@ SUPABASE_ANON_KEY=<anon 또는 sb_publishable_ 키>
 |---|---|
 | 행 | `supabase-event-record` 15개 필드 전부 필수, 추가 필드 금지. `ingested_at` 은 DB가 생성(보내지 않음) |
 | 원본 | `event_payload` = `ppe-event` 전체(jsonb). `violation_count`=`violations` 길이, `violation_types`=사람별 유형 합집합 |
+| 이벤트 단위 | **위반자 1명 = 이벤트 1건**(B 파트 결정, `dedup_key` 가 사람 1명 기준). 따라서 `violation_count`=1, `violations` 1명. 한 프레임에 위반자가 여럿이면 같은 `frame_id`·시각·JPEG(`image_sha256` 동일)로 이벤트가 여러 건 생긴다 |
 | 시각 | RFC 3339 UTC, `Z` 필수(`+09:00` 금지). 표시할 때만 현지 시간대로 변환 |
 | `occurred_at` | `capture_ts_utc` 가 있고 `gateway_received_at` 과 차이 ≤ `TIME_MAX_DEVICE_SKEW_MS`(2000) → `DEVICE_SNTP`, 아니면 수신 시각 + `GATEWAY_RECEIVED` |
 | ID | `event_id`·`frame_id` UUIDv7 소문자. `event_id` 는 영구 불변(재시도·재업로드에도 동일, PK) |
@@ -199,6 +201,7 @@ SUPABASE_ANON_KEY=<anon 또는 sb_publishable_ 키>
 | 이미지 | 비공개 버킷 `ppe-evidence`, 경로 `{device_id}/{yyyy}/{mm}/{dd}/{event_id}.jpg`(occurred_at UTC 날짜), `image/jpeg`, ≤ 1 MiB, `image_sha256` = 실제 바이트 SHA-256. JSON에 Base64 금지 |
 | 업로드 | Storage `POST /storage/v1/object/ppe-evidence/{path}` + `x-upsert: false` → `POST /rest/v1/ppe_events?on_conflict=event_id` + `Prefer: resolution=ignore-duplicates,return=minimal` |
 | 재시도 | 408/429/5xx·네트워크 → 백오프(`Retry-After` 우선), 400/422 → 재시도 안 함, 401/403 → 즉시 중단 |
+| Storage 용량 | 같은 JPEG 가 `event_id` 경로마다 따로 저장된다 → 용량 ≈ **이벤트 수 × JPEG 크기**(프레임 수가 아님). 요약의 "증거 프레임" 타일로 이벤트 수와 실제 프레임 수 차이를 볼 수 있다 |
 | 대시보드 조회 | 토큰(anon key)으로 `select`: `occurred_at` gte/lt, `device_id=in.(…)`, `violation_types=ov.{…}`, `order=occurred_at.desc`, `offset/limit` + `Prefer: count=exact`. 이미지는 `createSignedUrl`(기본 120초) |
 | 접근 | 토큰 없는 요청은 거부. 쓰기는 service_role(cloud-sync, seed)만 |
 
@@ -206,6 +209,8 @@ SUPABASE_ANON_KEY=<anon 또는 sb_publishable_ 키>
 - 장치 목록: 지금은 최근 1000행에서 추출 → 장치 테이블/뷰가 생기면 교체
 - 요약/차트: 경량 컬럼을 최대 5000행 조회해 클라이언트에서 집계 → 데이터가 늘면 집계 RPC/뷰로 교체
 - 정식 마이그레이션은 `cloud/` 로 옮긴다(`seed/schema.sql` 은 dev 전용)
+- 같은 프레임 조회(`event_payload->>frame_id`)는 지금 인덱스가 없다 → 행이 늘면 식 인덱스 또는 `frame_id` 컬럼 추가(계약 변경이므로 [integration-plan](../docs/integration-plan.md) §5 절차)
+- 같은 JPEG 중복 저장을 줄이려면 Storage 경로를 프레임 기준으로 바꿔야 하는데, 이는 `storage_path` 계약 변경이다(C + D 승인)
 
 ## 테스트
 

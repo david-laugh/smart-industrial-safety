@@ -186,14 +186,14 @@
   function renderKpis(stats) {
     const helmet = stats.filter((r) => r.violation_types.includes("HELMET_MISSING")).length;
     const vest = stats.filter((r) => r.violation_types.includes("VEST_MISSING")).length;
-    const people = stats.reduce((s, r) => s + r.violation_count, 0);
+    const frames = new Set(stats.map((r) => r.frame_id)).size;
     const devices = new Set(stats.map((r) => r.device_id)).size;
     const total = (state.allDevices || []).length;
     const tiles = [
       { label: "이벤트", value: stats.length, sub: "선택한 조건" },
       { label: "안전모 미착용", value: helmet, sub: "포함 이벤트 수" },
       { label: "안전조끼 미착용", value: vest, sub: "포함 이벤트 수" },
-      { label: "위반 인원", value: people, sub: "이벤트별 인원 합계" },
+      { label: "증거 프레임", value: frames, sub: "위반자 1명 = 이벤트 1건" },
       { label: "이벤트 발생 장치", value: devices, sub: `전체 ${total}대 중` },
     ];
     $("kpis").innerHTML = tiles
@@ -398,13 +398,7 @@
     const src = SOURCE_LABEL[row.occurred_at_source] || { text: row.occurred_at_source, hint: "" };
     const ratio = `${p.image.width} / ${p.image.height}`;
 
-    const boxes = p.violations
-      .map((v) => {
-        const b = v.bbox;
-        const style = `left:${b.x_min * 100}%;top:${b.y_min * 100}%;width:${(b.x_max - b.x_min) * 100}%;height:${(b.y_max - b.y_min) * 100}%`;
-        return `<div class="bbox ${b.y_min < 0.06 ? "flip" : ""}" style="${style}"><span class="bbox-label">P${v.person_index} · ${esc(personLabel(v))}</span></div>`;
-      })
-      .join("");
+    const boxes = p.violations.map((v) => bboxHtml(v, "")).join("");
 
     const people = p.violations
       .map(
@@ -437,6 +431,12 @@
       <section>
         <h3>위반 인원 ${p.violations.length}명</h3>
         <div class="people">${people}</div>
+      </section>
+
+      <section id="frame-siblings" hidden>
+        <h3>같은 프레임의 다른 위반 <span id="sibling-count"></span></h3>
+        <div class="siblings" id="sibling-list"></div>
+        <p class="muted small">위반자 1명당 이벤트 1건이라, 같은 증거 이미지가 이벤트마다 따로 저장됩니다.</p>
       </section>
 
       <section>
@@ -484,6 +484,38 @@
     });
     $("resign-btn").addEventListener("click", () => loadEvidence(row));
     loadEvidence(row);
+    loadSiblings(row);
+  }
+
+  function bboxHtml(v, extraCls) {
+    const b = v.bbox;
+    const style = `left:${b.x_min * 100}%;top:${b.y_min * 100}%;width:${(b.x_max - b.x_min) * 100}%;height:${(b.y_max - b.y_min) * 100}%`;
+    return `<div class="bbox ${extraCls} ${b.y_min < 0.06 ? "flip" : ""}" style="${style}"><span class="bbox-label">P${v.person_index} · ${esc(personLabel(v))}</span></div>`;
+  }
+
+  // 같은 frame_id 로 만들어진 다른 이벤트(한 프레임에 위반자가 여럿이면 사람마다 이벤트가 따로 생긴다)
+  async function loadSiblings(row) {
+    let rows;
+    try {
+      rows = await ds.listFrameEvents(row.event_payload.frame_id);
+    } catch (err) {
+      return; // 보조 정보이므로 실패해도 상세 화면은 유지
+    }
+    if (state.selectedId !== row.event_id) return;
+    const others = rows.filter((r) => r.event_id !== row.event_id);
+    if (!others.length) return;
+    const ev = $("detail-body").querySelector(".evidence");
+    ev.insertAdjacentHTML("beforeend", others.flatMap((r) => r.event_payload.violations.map((v) => bboxHtml(v, "other"))).join(""));
+    $("bbox-toggle").dispatchEvent(new Event("change"));
+    $("sibling-count").textContent = `${others.length}건`;
+    $("sibling-list").innerHTML = others
+      .map((r) =>
+        r.event_payload.violations
+          .map((v) => `<a class="sibling" href="#event=${esc(r.event_id)}"><span>사람 P${v.person_index}</span>${typeTags(v.violation_types)}</a>`)
+          .join("")
+      )
+      .join("");
+    $("frame-siblings").hidden = false;
   }
 
   async function loadEvidence(row) {

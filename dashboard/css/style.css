@@ -561,6 +561,35 @@ table.events tbody tr.fresh {
   top: 0;
   border-radius: 0 0 3px 0;
 }
+/* 같은 프레임의 다른 이벤트 위반자 */
+.bbox.other {
+  border: 2px dashed rgba(255, 255, 255, 0.85);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
+}
+.bbox.other .bbox-label {
+  background: rgba(11, 11, 11, 0.7);
+  font-weight: 500;
+}
+.siblings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.sibling {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 13px;
+  color: var(--text);
+  text-decoration: none;
+}
+.sibling:hover {
+  background: var(--hover);
+}
 .evidence-tools {
   display: flex;
   justify-content: space-between;

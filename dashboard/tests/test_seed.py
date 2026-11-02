@@ -131,3 +131,27 @@ def test_dry_run_writes_files(tmp_path):
     assert len(rows) == 4
     for r in rows:
         assert (tmp_path / "storage" / "ppe-evidence" / r["storage_path"]).is_file()
+
+
+def test_one_event_per_violating_person(events):
+    """B 파트 결정: dedup_key 가 사람 1명 기준 → 위반자 1명 = 이벤트 1건."""
+    for row, _ in events:
+        [person] = row["event_payload"]["violations"]
+        assert row["violation_count"] == 1
+        assert row["violation_types"] == sorted(person["violation_types"])
+
+
+def test_same_frame_events_share_image_but_not_ids(events):
+    by_frame = {}
+    for row, jpeg in events:
+        by_frame.setdefault(row["event_payload"]["frame_id"], []).append((row, jpeg))
+    multi = [g for g in by_frame.values() if len(g) > 1]
+    assert multi, "한 프레임에 위반자가 여럿인 경우가 생성되지 않았습니다"
+    for group in multi:
+        rows = [r for r, _ in group]
+        assert len({r["image_sha256"] for r in rows}) == 1 and len({j for _, j in group}) == 1
+        assert len({r["occurred_at"] for r in rows}) == 1
+        assert len({r["event_id"] for r in rows}) == len(rows)
+        assert len({r["storage_path"] for r in rows}) == len(rows)  # 같은 JPEG 가 event_id 마다 저장
+        assert len({r["event_payload"]["violations"][0]["person_index"] for r in rows}) == len(rows)
+        assert len({r["event_payload"]["decision"]["dedup_key"] for r in rows}) == len(rows)

@@ -14,7 +14,11 @@ ANON_KEY = "sb_publishable_test"
 
 def _match(row, col, expr):
     op, _, val = expr.partition(".")
-    cell = row[col]
+    if "->>" in col:  # PostgREST JSON 경로(텍스트)
+        base, key = col.split("->>")
+        cell = str(row[base][key])
+    else:
+        cell = row[col]
     if op == "eq":
         return str(cell) == val
     if op == "gte":
@@ -26,6 +30,15 @@ def _match(row, col, expr):
     if op == "ov":
         return bool(set(cell) & set(val.strip("{}").split(",")))
     raise AssertionError(f"지원하지 않는 필터: {col}={expr}")
+
+
+def _pick(row, col):
+    """select 항목: `col` 또는 `alias:base->>key`."""
+    alias, _, expr = col.rpartition(":")
+    if "->>" in expr:
+        base, key = expr.split("->>")
+        return alias or key, str(row[base][key])
+    return alias or expr, row[expr]
 
 
 class FakeSupabase:
@@ -78,8 +91,7 @@ class FakeSupabase:
         total = len(rows)
         page = rows[offset : offset + limit] if limit is not None else rows[offset:]
         if cols != "*":
-            keep = cols.split(",")
-            page = [{c: r[c] for c in keep} for r in page]
+            page = [dict(_pick(r, c) for c in cols.split(",")) for r in page]
         h = {**cors, "content-type": "application/json"}
         if "count=exact" in headers.get("prefer", ""):
             h["content-range"] = f"{offset}-{offset + max(len(page) - 1, 0)}/{total}"

@@ -45,7 +45,7 @@ def test_list_query_follows_contract(sb_page, fake):
     # 토큰으로 요청(로그인 세션 없음): apikey 와 Bearer 모두 anon 토큰
     assert page_h["apikey"] == ANON_KEY and page_h["authorization"] == f"Bearer {ANON_KEY}"
     # 요약/차트는 경량 컬럼만
-    assert any(q.get("select") == "occurred_at,device_id,violation_types,violation_count" for q, _ in selects)
+    assert any(q.get("select") == "occurred_at,device_id,violation_types,violation_count,frame_id:event_payload->>frame_id" for q, _ in selects)
 
 
 def test_list_shows_supabase_rows(sb_page, fake):
@@ -89,7 +89,7 @@ def test_detail_uses_signed_url_from_storage(sb_page, fake):
     assert signs[-1] == f"/storage/v1/object/sign/ppe-evidence/{target['storage_path']}"
     src = sb_page.get_attribute("#evidence-img", "src")
     assert src.startswith(f"{FAKE_URL}/storage/v1/object/sign/ppe-evidence/") and "token=" in src
-    assert sb_page.locator(".bbox").count() == target["violation_count"]
+    assert sb_page.locator(".bbox:not(.other)").count() == target["violation_count"]
 
 
 def test_deep_link_fetches_single_event(sb_page, fake):
@@ -97,3 +97,17 @@ def test_deep_link_fetches_single_event(sb_page, fake):
     sb_page.goto(sb_page.url.split("#")[0] + "#event=" + oldest["event_id"])
     sb_page.wait_for_selector("#evidence-img:not([hidden])")
     assert any(dict(q).get("event_id") == f"eq.{oldest['event_id']}" for m, p, q, _ in fake.requests if p == "/rest/v1/ppe_events")
+
+
+def test_same_frame_query_uses_json_path(sb_page, fake):
+    row = sb_page.locator("#events-body tr").first
+    event_id = row.get_attribute("data-id")
+    row.click()
+    sb_page.wait_for_selector("#evidence-img:not([hidden])")
+    frame_id = next(r for r in fake.rows if r["event_id"] == event_id)["event_payload"]["frame_id"]
+    sent = lambda: any(dict(q).get("event_payload->>frame_id") == f"eq.{frame_id}" for m, p, q, _ in fake.requests if p == "/rest/v1/ppe_events")  # noqa: E731
+    for _ in range(50):
+        if sent():
+            break
+        sb_page.wait_for_timeout(100)
+    assert sent()

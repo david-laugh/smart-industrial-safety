@@ -76,14 +76,20 @@
     return { status: "WORN", confidence: round2(0.6 + rand() * 0.38) };
   }
 
-  function makeViolations(rand) {
-    const people = rand() < 0.7 ? 1 : rand() < 0.75 ? 2 : 3;
-    const slotW = 1 / people;
+  // 프레임 속 사람들. 위반자(violation_types 비어 있지 않음) 최소 1명, 나머지는 준수자일 수 있다.
+  function makePeople(rand) {
+    const n = rand() < 0.6 ? 1 : rand() < 0.7 ? 2 : 3;
+    const slotW = 1 / n;
+    const violator = Math.floor(rand() * n);
     const out = [];
-    for (let i = 0; i < people; i++) {
-      const r = rand();
-      const helmetMissing = r < 0.55 || r >= 0.85;
-      const vestMissing = r >= 0.55;
+    for (let i = 0; i < n; i++) {
+      let helmetMissing = false;
+      let vestMissing = false;
+      if (i === violator || rand() >= 0.4) {
+        const r = rand();
+        helmetMissing = r < 0.55 || r >= 0.85;
+        vestMissing = r >= 0.55;
+      }
       const w = Math.min(slotW * 0.75, 0.16 + rand() * 0.12);
       const h = 0.55 + rand() * 0.35;
       const xMin = i * slotW + rand() * (slotW - w);
@@ -121,73 +127,85 @@
     return `${deviceId}|${who}|${types}|${windowStart}`;
   }
 
-  function makeEvent(rand, occurredMs, deviceId) {
+  // 증거 이미지에 그릴 프레임 전체 인원(준수자 포함). 행에는 계약상 위반자만 들어가므로 따로 보관한다.
+  const framePeople = new Map();
+
+  // 프레임 1장 → 위반자마다 이벤트 1건(dedup_key 가 사람 1명 기준).
+  // 같은 프레임의 이벤트는 frame_id·시각·이미지(sha256)를 공유하고 event_id·violations·dedup_key 만 다르다.
+  function makeFrameEvents(rand, occurredMs, deviceId) {
     const sntp = rand() < 0.85;
     const captureMs = occurredMs;
     const gatewayMs = captureMs + 40 + rand() * 160;
     const decidedMs = gatewayMs + 300 + rand() * 1200;
     const occurredUsed = sntp ? captureMs : gatewayMs;
-    const eventId = uuidv7(rand, decidedMs);
     const frameId = uuidv7(rand, gatewayMs);
     const imageSha = hex(rand, 64);
-    const violations = makeViolations(rand);
-    const types = Array.from(new Set(violations.flatMap((v) => v.violation_types)));
-    const dedupKey = makeDedupKey(deviceId, violations[0], occurredUsed);
+    const byteLength = 30000 + Math.floor(rand() * 60000);
+    const bootId = hex(rand, 8);
+    const frameSeq = Math.floor(rand() * 200000);
+    const uptime = Math.floor(rand() * 86400000);
+    const framesConsidered = 3 + Math.floor(rand() * 3);
+    const people = makePeople(rand);
+    framePeople.set(frameId, people);
 
-    const payload = {
-      schema_version: "1.0.0",
-      event_id: eventId,
-      event_type: "PPE_VIOLATION",
-      device_id: deviceId,
-      frame_id: frameId,
-      boot_id: hex(rand, 8),
-      frame_seq: Math.floor(rand() * 200000),
-      timestamps: {
-        occurred_at_utc: iso(occurredUsed),
-        occurred_at_source: sntp ? "DEVICE_SNTP" : "GATEWAY_RECEIVED",
-        capture_ts_utc: sntp ? iso(captureMs) : null,
-        mcu_uptime_ms: Math.floor(rand() * 86400000),
-        gateway_received_at_utc: iso(gatewayMs),
-        gateway_clock_synced: true,
-        decided_at_utc: iso(decidedMs),
-      },
-      violations,
-      image: {
-        image_path: `images/${datePath(occurredUsed)}/${eventId}.jpg`,
-        content_type: "image/jpeg",
-        byte_length: 30000 + Math.floor(rand() * 60000),
-        sha256: imageSha,
-        width: IMAGE_W,
-        height: IMAGE_H,
-      },
-      model: Object.assign({ sha256: "0".repeat(64) }, MODEL),
-      decision: {
-        policy_version: "0.1.0",
-        dedup_key: dedupKey,
-        dedup_window_s: DEDUP_WINDOW_S,
-        frames_considered: 3 + Math.floor(rand() * 3),
-      },
-    };
-
-    return {
-      event_id: eventId,
-      schema_version: "1.0.0",
-      device_id: deviceId,
-      occurred_at: iso(occurredUsed),
-      occurred_at_source: payload.timestamps.occurred_at_source,
-      gateway_received_at: iso(gatewayMs),
-      decided_at: iso(decidedMs),
-      violation_count: violations.length,
-      violation_types: types,
-      storage_bucket: "ppe-evidence",
-      storage_path: `${deviceId}/${datePath(occurredUsed)}/${eventId}.jpg`,
-      image_sha256: imageSha,
-      model_name: MODEL.name,
-      model_version: MODEL.version,
-      event_payload: payload,
-      // 서버 생성 컬럼(클라이언트가 업로드하지 않음)
-      ingested_at: iso(decidedMs + 2000 + rand() * 20000),
-    };
+    return people
+      .filter((v) => v.violation_types.length)
+      .map((v) => {
+        const eventId = uuidv7(rand, decidedMs);
+        const payload = {
+          schema_version: "1.0.0",
+          event_id: eventId,
+          event_type: "PPE_VIOLATION",
+          device_id: deviceId,
+          frame_id: frameId,
+          boot_id: bootId,
+          frame_seq: frameSeq,
+          timestamps: {
+            occurred_at_utc: iso(occurredUsed),
+            occurred_at_source: sntp ? "DEVICE_SNTP" : "GATEWAY_RECEIVED",
+            capture_ts_utc: sntp ? iso(captureMs) : null,
+            mcu_uptime_ms: uptime,
+            gateway_received_at_utc: iso(gatewayMs),
+            gateway_clock_synced: true,
+            decided_at_utc: iso(decidedMs),
+          },
+          violations: [v],
+          image: {
+            image_path: `images/${datePath(occurredUsed)}/${eventId}.jpg`,
+            content_type: "image/jpeg",
+            byte_length: byteLength,
+            sha256: imageSha,
+            width: IMAGE_W,
+            height: IMAGE_H,
+          },
+          model: Object.assign({ sha256: "0".repeat(64) }, MODEL),
+          decision: {
+            policy_version: "0.1.0",
+            dedup_key: makeDedupKey(deviceId, v, occurredUsed),
+            dedup_window_s: DEDUP_WINDOW_S,
+            frames_considered: framesConsidered,
+          },
+        };
+        return {
+          event_id: eventId,
+          schema_version: "1.0.0",
+          device_id: deviceId,
+          occurred_at: iso(occurredUsed),
+          occurred_at_source: payload.timestamps.occurred_at_source,
+          gateway_received_at: iso(gatewayMs),
+          decided_at: iso(decidedMs),
+          violation_count: 1,
+          violation_types: v.violation_types.slice().sort(),
+          storage_bucket: "ppe-evidence",
+          storage_path: `${deviceId}/${datePath(occurredUsed)}/${eventId}.jpg`,
+          image_sha256: imageSha,
+          model_name: MODEL.name,
+          model_version: MODEL.version,
+          event_payload: payload,
+          // 서버 생성 컬럼(클라이언트가 업로드하지 않음)
+          ingested_at: iso(decidedMs + 2000 + rand() * 20000),
+        };
+      });
   }
 
   function generate(opts) {
@@ -195,17 +213,18 @@
     // 정시 단위로 고정해 새로고침해도 event_id(딥링크)가 유지되게 한다
     const now = opts.now || Math.floor(Date.now() / 3600000) * 3600000;
     const rows = [];
-    for (let i = 0; i < opts.eventCount; i++) {
+    while (rows.length < opts.eventCount) {
       const occurred = randomOccurredAt(rand, now, opts.days);
-      rows.push(makeEvent(rand, occurred, pick(rand, DEVICES)));
+      rows.push(...makeFrameEvents(rand, occurred, pick(rand, DEVICES)));
     }
-    rows.sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : -1));
+    rows.length = opts.eventCount;
+    rows.sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : a.occurred_at > b.occurred_at ? -1 : a.event_id < b.event_id ? -1 : 1));
     return rows;
   }
 
-  // 실시간 시뮬레이션용 새 이벤트 1건
+  // 실시간 시뮬레이션용 새 프레임 1장의 이벤트들
   function generateLive(rand, now) {
-    return makeEvent(rand, now - 1500, pick(rand, DEVICES));
+    return makeFrameEvents(rand, now - 1500, pick(rand, DEVICES));
   }
 
   // ---- 증거 이미지(SVG) ----
@@ -247,7 +266,7 @@
 
   function evidenceSvg(row) {
     const p = row.event_payload;
-    const people = p.violations.map(personSvg).join("");
+    const people = (framePeople.get(p.frame_id) || p.violations).map(personSvg).join("");
     const svg =
       `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${IMAGE_W} ${IMAGE_H}" width="${IMAGE_W}" height="${IMAGE_H}">` +
       `<defs><linearGradient id="w" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8a9097"/><stop offset="1" stop-color="#5d636a"/></linearGradient></defs>` +

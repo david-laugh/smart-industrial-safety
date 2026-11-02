@@ -70,7 +70,7 @@ def test_detail_overlay_and_deep_link(page):
     people = int(row.locator("td").nth(3).inner_text())
     row.click()
     page.wait_for_selector("#evidence-img:not([hidden])")
-    assert page.locator(".bbox").count() == people
+    assert page.locator(".bbox:not(.other)").count() == people
     assert page.locator(".person").count() == people
     assert "Signed URL 만료" in page.inner_text("#signed-meta")
 
@@ -106,3 +106,21 @@ def test_mobile_has_no_horizontal_scroll(browser, base_url):
     page.wait_for_selector("#events-body tr")
     assert page.evaluate("document.documentElement.scrollWidth") <= 375
     ctx.close()
+
+
+def test_same_frame_events_are_linked(page):
+    pair = page.evaluate(
+        """() => {
+          const rows = PPE.sampleData.generate(PPE.config.sample);
+          const by = {};
+          for (const r of rows) (by[r.event_payload.frame_id] ||= []).push(r.event_id);
+          return Object.values(by).find((ids) => ids.length > 1);
+        }"""
+    )
+    page.goto(page.url.split("#")[0] + "#event=" + pair[0])
+    page.wait_for_selector("#frame-siblings:not([hidden])")
+    assert page.locator(".bbox.other").count() == len(pair) - 1
+    page.locator(f"#sibling-list a[href='#event={pair[1]}']").click()
+    page.wait_for_function("(id) => location.hash === '#event=' + id", arg=pair[1])
+    page.wait_for_selector("#frame-siblings:not([hidden])")
+    assert not page.js_errors
