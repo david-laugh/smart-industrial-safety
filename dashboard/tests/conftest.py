@@ -1,32 +1,39 @@
-"""대시보드 테스트 공용 fixture: 정적 서버, 헤드리스 브라우저, 계약 스키마 레지스트리."""
+"""대시보드 테스트 공용 fixture: FastAPI 서버, 헤드리스 브라우저, 계약 스키마 레지스트리."""
 
-import functools
-import http.server
 import json
+import sys
 import threading
+import time
 from pathlib import Path
 
 import pytest
+import uvicorn
 from playwright.sync_api import sync_playwright
 from referencing import Registry, Resource
 
 DASHBOARD_DIR = Path(__file__).resolve().parents[1]
 CONTRACTS_DIR = DASHBOARD_DIR.parent / "contracts"
+sys.path.insert(0, str(DASHBOARD_DIR))
 
-
-class _QuietHandler(http.server.SimpleHTTPRequestHandler):
-    def log_message(self, *args):
-        pass
+from server.main import Settings, create_app  # noqa: E402
 
 
 @pytest.fixture(scope="session")
 def base_url():
-    handler = functools.partial(_QuietHandler, directory=str(DASHBOARD_DIR))
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    """목업 모드 FastAPI 앱을 임의 포트의 uvicorn으로 띄운다(로컬 .env 영향 없음)."""
+    config = uvicorn.Config(create_app(Settings()), host="127.0.0.1", port=0, log_level="warning")
+    server = uvicorn.Server(config)
+    thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
-    yield f"http://127.0.0.1:{server.server_address[1]}/"
-    server.shutdown()
+    deadline = time.monotonic() + 10
+    while not server.started:
+        if time.monotonic() > deadline:
+            raise RuntimeError("uvicorn 이 시작되지 않았습니다")
+        time.sleep(0.05)
+    port = server.servers[0].sockets[0].getsockname()[1]
+    yield f"http://127.0.0.1:{port}/"
+    server.should_exit = True
+    thread.join(timeout=5)
 
 
 @pytest.fixture(scope="session")
@@ -39,11 +46,12 @@ def browser():
 
 @pytest.fixture
 def page(browser, base_url):
-    """로그인 전 상태의 새 페이지. JS 예외는 page.js_errors 에 쌓인다."""
+    """로그인 전 상태의 새 페이지. JS 예외와 콘솔 오류(CSP 위반, 404 포함)는 page.js_errors 에 쌓인다."""
     context = browser.new_context(viewport={"width": 1280, "height": 900}, locale="ko-KR", timezone_id="Asia/Seoul")
     pg = context.new_page()
     pg.js_errors = []
     pg.on("pageerror", lambda e: pg.js_errors.append(str(e)))
+    pg.on("console", lambda m: m.type == "error" and pg.js_errors.append(m.text))
     pg.goto(base_url)
     yield pg
     context.close()

@@ -134,8 +134,9 @@
       <div id="chart-tip" class="tooltip" hidden></div>
     </div>
 
-    <!-- config.local.js 는 선택(없어도 됨, 커밋 금지). config.js 보다 먼저 로드되어야 한다. -->
-    <script src="js/config.local.js" onerror="void 0"></script>
+    <!-- config.local.js: FastAPI 서버가 환경변수로 생성. 정적 서버로 열 때는 선택 파일(커밋 금지).
+         config.js 보다 먼저 로드되어야 한다. -->
+    <script src="js/config.local.js"></script>
     <script src="js/config.js"></script>
     <script src="js/mock-data.js"></script>
     <script src="js/data-source.js"></script>

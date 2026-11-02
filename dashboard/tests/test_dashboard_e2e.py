@@ -29,7 +29,7 @@ def test_requires_login(page):
 def test_violation_type_filter(logged_in):
     page = logged_in
     page.click("[data-range='30d']")
-    page.wait_for_function("document.getElementById('list-meta').innerText.includes('총')")
+    page.wait_for_function("() => document.getElementById('list-meta').innerText.includes('총')")
     before = page.inner_text("#list-meta")
     page.check("#type-chips input[value='VEST_MISSING']")
     _wait_list_change(page, before)
@@ -52,7 +52,7 @@ def test_device_filter(logged_in):
 def test_24h_range_uses_hourly_buckets(logged_in):
     page = logged_in
     page.click("[data-range='24h']")
-    page.wait_for_function("document.getElementById('chart-title').innerText.startsWith('시간별')")
+    page.wait_for_function("() => document.getElementById('chart-title').innerText.startsWith('시간별')")
     assert page.locator("#chart .hit").count() == 24
 
 
