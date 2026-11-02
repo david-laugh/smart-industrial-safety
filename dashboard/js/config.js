@@ -4,8 +4,8 @@ window.PPE = window.PPE || {};
 
 window.PPE.config = Object.assign(
   {
-    // "mock" = 브라우저 내 가데이터, "supabase" = 실제 ppe_events / ppe-evidence 조회
-    dataSource: "mock",
+    // "sample" = 브라우저에서 생성하는 샘플 데이터, "supabase" = 실제 ppe_events / ppe-evidence 조회
+    dataSource: "sample",
 
     // dataSource === "supabase" 일 때만 사용. anon key만 허용(service_role 금지).
     supabaseUrl: "",
@@ -18,8 +18,8 @@ window.PPE.config = Object.assign(
 
     pageSize: 20,
 
-    // 목업 모드 전용
-    mock: {
+    // 샘플 모드 전용
+    sample: {
       seed: 20261102,
       days: 30,
       eventCount: 180,

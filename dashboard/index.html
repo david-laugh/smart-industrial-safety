@@ -7,34 +7,17 @@
     <link rel="stylesheet" href="css/style.css" />
   </head>
   <body>
-    <!-- 로그인 -->
-    <section id="login-view" class="login" hidden>
-      <form id="login-form" class="login-card">
-        <h1>PPE 이벤트 대시보드</h1>
-        <p class="muted">인증된 사용자만 이벤트를 볼 수 있습니다.</p>
-        <p id="login-mock-note" class="note" hidden>목업 모드: 아무 이메일로 로그인할 수 있습니다. 비밀번호는 확인하지 않습니다.</p>
-        <label>이메일<input id="login-email" type="email" autocomplete="username" required /></label>
-        <label>비밀번호<input id="login-password" type="password" autocomplete="current-password" /></label>
-        <p id="login-error" class="error" role="alert" hidden></p>
-        <button type="submit" class="btn primary">로그인</button>
-      </form>
-    </section>
-
-    <!-- 메인 -->
-    <div id="app-view" hidden>
+    <div id="app-view">
       <header class="topbar">
         <div class="brand">
           <span class="brand-mark" aria-hidden="true"></span>
           <h1>PPE 미착용 이벤트</h1>
-          <span id="source-badge" class="badge"></span>
         </div>
         <div class="topbar-right">
           <label class="switch" title="새 이벤트를 실시간으로 받아 목록에 반영">
             <input id="live-toggle" type="checkbox" />
             <span>실시간</span>
           </label>
-          <span id="user-email" class="muted small"></span>
-          <button id="logout-btn" class="btn ghost small" type="button">로그아웃</button>
         </div>
       </header>
 
@@ -138,7 +121,7 @@
          config.js 보다 먼저 로드되어야 한다. -->
     <script src="js/config.local.js"></script>
     <script src="js/config.js"></script>
-    <script src="js/mock-data.js"></script>
+    <script src="js/sample-data.js"></script>
     <script src="js/data-source.js"></script>
     <script src="js/app.js"></script>
   </body>

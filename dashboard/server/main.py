@@ -31,7 +31,7 @@ class Settings:
     port: int = 8765
     reload: bool = False
     log_level: str = "info"
-    data_source: str = "mock"
+    data_source: str = "sample"
     supabase_url: str = ""
     supabase_anon_key: str = ""
     events_table: str = "ppe_events"
@@ -50,7 +50,7 @@ class Settings:
             port=int(g("DASHBOARD_PORT", "8765")),
             reload=g("DASHBOARD_RELOAD", "false").lower() in ("1", "true", "yes"),
             log_level=g("LOG_LEVEL", "info").lower(),
-            data_source=g("DASHBOARD_DATA_SOURCE", "mock").lower(),
+            data_source=g("DASHBOARD_DATA_SOURCE", "sample").lower(),
             supabase_url=g("SUPABASE_URL").rstrip("/"),
             supabase_anon_key=g("SUPABASE_ANON_KEY"),
             events_table=g("SUPABASE_EVENTS_TABLE", "ppe_events"),
@@ -59,8 +59,8 @@ class Settings:
         )
 
     def validate(self):
-        if self.data_source not in ("mock", "supabase"):
-            raise ValueError(f"DASHBOARD_DATA_SOURCE 는 mock 또는 supabase 여야 합니다: {self.data_source!r}")
+        if self.data_source not in ("sample", "supabase"):
+            raise ValueError(f"DASHBOARD_DATA_SOURCE 는 sample 또는 supabase 여야 합니다: {self.data_source!r}")
         if self.data_source != "supabase":
             return
         if not self.supabase_url or not self.supabase_anon_key:

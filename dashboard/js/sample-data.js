@@ -1,4 +1,4 @@
-// 목업 데이터 생성기.
+// 샘플 데이터 생성기.
 // contracts/supabase-event-record.schema.json 형태의 행을 결정적(seed)으로 만든다.
 // 증거 이미지는 bbox 위치에 사람을 그린 SVG(data URI)로 대신한다.
 (function (PPE) {
@@ -8,7 +8,7 @@
   const IMAGE_W = 640;
   const IMAGE_H = 480;
   const MODEL = {
-    name: "ppe-detector-mock",
+    name: "ppe-detector",
     version: "0.1.0",
     input_width: 640,
     input_height: 640,
@@ -244,10 +244,9 @@
       `<path d="M0 ${IMAGE_H * 0.86} L${IMAGE_W} ${IMAGE_H * 0.86}" stroke="#d9b400" stroke-width="6" stroke-dasharray="28 18"/>` +
       people +
       `<text x="12" y="24" font-family="monospace" font-size="15" fill="#ffffff" opacity="0.85">${row.device_id}  ${p.timestamps.occurred_at_utc}</text>` +
-      `<text x="${IMAGE_W - 12}" y="${IMAGE_H - 12}" text-anchor="end" font-family="sans-serif" font-size="14" fill="#ffffff" opacity="0.6">MOCK EVIDENCE</text>` +
       `</svg>`;
     return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
   }
 
-  PPE.mockData = { DEVICES, generate, generateLive, evidenceSvg, mulberry32 };
+  PPE.sampleData = { DEVICES, generate, generateLive, evidenceSvg, mulberry32 };
 })(window.PPE);

@@ -564,51 +564,7 @@
     });
   }
 
-  // ---------- 인증 / 시작 ----------
-
-  function showLogin() {
-    $("app-view").hidden = true;
-    $("login-view").hidden = false;
-    $("login-mock-note").hidden = ds.kind !== "mock";
-    $("login-password").required = ds.kind !== "mock";
-    $("login-email").focus();
-  }
-
-  async function showApp(session) {
-    $("login-view").hidden = true;
-    $("app-view").hidden = false;
-    $("user-email").textContent = (session.user && session.user.email) || "";
-    const badge = $("source-badge");
-    badge.textContent = ds.kind === "mock" ? "MOCK 데이터" : "Supabase";
-    badge.classList.toggle("mock", ds.kind === "mock");
-    renderRangeSeg();
-    await initDevices();
-    reload();
-    if (location.hash) openFromHash();
-  }
-
-  function bindAuth() {
-    $("login-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      $("login-error").hidden = true;
-      try {
-        const session = await ds.auth.signIn($("login-email").value.trim(), $("login-password").value);
-        $("login-password").value = "";
-        showApp(session);
-      } catch (err) {
-        $("login-error").textContent = "로그인 실패: " + err.message;
-        $("login-error").hidden = false;
-      }
-    });
-    $("logout-btn").addEventListener("click", async () => {
-      if (unsubscribe) unsubscribe();
-      unsubscribe = null;
-      $("live-toggle").checked = false;
-      closeDetail();
-      await ds.auth.signOut();
-      showLogin();
-    });
-  }
+  // ---------- 시작 ----------
 
   let resizeTimer = null;
   window.addEventListener("resize", () => {
@@ -625,14 +581,14 @@
       document.body.innerHTML = `<p class="error" style="padding:24px">데이터 소스 초기화 실패: ${esc(err.message)}</p>`;
       return;
     }
-    bindAuth();
     bindFilters();
     bindList();
     bindDetail();
     bindLive();
-    const session = await ds.auth.getSession();
-    if (session) showApp(session);
-    else showLogin();
+    renderRangeSeg();
+    await initDevices();
+    reload();
+    if (location.hash) openFromHash();
   }
 
   main();

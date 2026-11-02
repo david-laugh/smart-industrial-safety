@@ -32,7 +32,7 @@ def test_serves_index_and_assets(client):
     assert r.status_code == 200 and "PPE 이벤트 대시보드" in r.text
     assert client.get("/css/style.css").status_code == 200
     assert client.get("/js/app.js").status_code == 200
-    assert client.get("/healthz").json() == {"status": "ok", "data_source": "mock"}
+    assert client.get("/healthz").json() == {"status": "ok", "data_source": "sample"}
 
 
 @pytest.mark.parametrize(
@@ -43,8 +43,8 @@ def test_does_not_expose_other_files(client, path):
     assert client.get(path).status_code == 404
 
 
-def test_mock_config_has_no_supabase_values(client):
-    assert _config_from(client) == {"dataSource": "mock"}
+def test_sample_config_has_no_supabase_values(client):
+    assert _config_from(client) == {"dataSource": "sample"}
 
 
 def test_supabase_config_is_injected():

@@ -1,7 +1,6 @@
 // 데이터 소스 어댑터. UI(app.js)는 이 인터페이스만 사용한다.
 //
-//   auth.getSession() / auth.signIn(email, password) / auth.signOut()
-//   listDevices()                         → string[]
+//   listDevices()                        → string[]
 //   listEvents(filter, { offset, limit }) → { rows, total }
 //   listStats(filter)                     → 요약/차트용 경량 행 [{ occurred_at, device_id, violation_types, violation_count }]
 //   getEvent(eventId)                     → row | null
@@ -27,49 +26,14 @@
     return new Promise((r) => setTimeout(() => r(v), 120 + Math.random() * 180));
   }
 
-  // ---------------- Mock ----------------
+  // ---------------- Sample ----------------
 
-  function createMockSource() {
-    const rows = PPE.mockData.generate(cfg.mock);
-    const liveRand = PPE.mockData.mulberry32(cfg.mock.seed ^ 0x5eed);
-    const SESSION_KEY = "ppe-dashboard-mock-session";
-
-    function readSession() {
-      try {
-        const raw = sessionStorage.getItem(SESSION_KEY);
-        return raw ? JSON.parse(raw) : null;
-      } catch (e) {
-        return null;
-      }
-    }
-
-    let session = readSession();
+  function createSampleSource() {
+    const rows = PPE.sampleData.generate(cfg.sample);
+    const liveRand = PPE.sampleData.mulberry32(cfg.sample.seed ^ 0x5eed);
 
     return {
-      kind: "mock",
-      auth: {
-        async getSession() {
-          return session;
-        },
-        async signIn(email) {
-          if (!email) throw new Error("이메일을 입력하세요.");
-          session = { user: { email } };
-          try {
-            sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
-          } catch (e) {
-            /* 저장 불가 환경에서도 동작 */
-          }
-          return delay(session);
-        },
-        async signOut() {
-          session = null;
-          try {
-            sessionStorage.removeItem(SESSION_KEY);
-          } catch (e) {
-            /* noop */
-          }
-        },
-      },
+      kind: "sample",
       async listDevices() {
         return delay(Array.from(new Set(rows.map((r) => r.device_id))).sort());
       },
@@ -94,23 +58,24 @@
       },
       async getSignedImageUrl(row) {
         return delay({
-          url: PPE.mockData.evidenceSvg(row),
+          url: PPE.sampleData.evidenceSvg(row),
           expiresAt: new Date(Date.now() + cfg.signedUrlExpiresSec * 1000).toISOString(),
         });
       },
       subscribe(onInsert) {
         const timer = setInterval(() => {
-          const row = PPE.mockData.generateLive(liveRand, Date.now());
+          const row = PPE.sampleData.generateLive(liveRand, Date.now());
           rows.unshift(row);
           onInsert(row);
-        }, cfg.mock.liveIntervalMs);
+        }, cfg.sample.liveIntervalMs);
         return () => clearInterval(timer);
       },
     };
   }
 
   // ---------------- Supabase ----------------
-  // cloud/README.md 설계(ppe_events select, ppe-evidence Signed URL, authenticated RLS)를 전제로 한다.
+  // cloud/README.md 설계(ppe_events select, ppe-evidence Signed URL)를 전제로 한다.
+  // 로그인 없이 anon 키로 조회하므로 RLS가 anon 읽기를 허용해야 한다(cloud/ 설계는 authenticated 전제 → 조정 필요).
 
   function loadScript(src) {
     return new Promise((resolve, reject) => {
@@ -144,19 +109,6 @@
 
     return {
       kind: "supabase",
-      auth: {
-        async getSession() {
-          const { data } = await sb.auth.getSession();
-          return data.session;
-        },
-        async signIn(email, password) {
-          const res = check(await sb.auth.signInWithPassword({ email, password }));
-          return res.data.session;
-        },
-        async signOut() {
-          await sb.auth.signOut();
-        },
-      },
       async listDevices() {
         // TODO(C): 장치 목록 뷰/테이블이 생기면 교체. 지금은 최근 행에서 추출.
         const res = check(await sb.from(cfg.table).select("device_id").order("occurred_at", { ascending: false }).limit(1000));
@@ -197,6 +149,6 @@
   }
 
   PPE.createDataSource = async function () {
-    return cfg.dataSource === "supabase" ? createSupabaseSource() : createMockSource();
+    return cfg.dataSource === "supabase" ? createSupabaseSource() : createSampleSource();
   };
 })(window.PPE);

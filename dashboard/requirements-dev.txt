@@ -1,6 +1,6 @@
 # 대시보드 개발/테스트 전용
 -r requirements.txt
-jsonschema>=4.23      # contracts/*.schema.json 으로 목업 데이터 검증
+jsonschema>=4.23      # contracts/*.schema.json 으로 샘플 데이터 검증
 pytest>=8.3
 httpx>=0.27           # FastAPI TestClient
 playwright>=1.48      # 헤드리스 브라우저 E2E (설치 후: python -m playwright install chromium)

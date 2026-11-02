@@ -20,7 +20,7 @@ from server.main import Settings, create_app  # noqa: E402
 
 @pytest.fixture(scope="session")
 def base_url():
-    """목업 모드 FastAPI 앱을 임의 포트의 uvicorn으로 띄운다(로컬 .env 영향 없음)."""
+    """샘플 모드 FastAPI 앱을 임의 포트의 uvicorn으로 띄운다(로컬 .env 영향 없음)."""
     config = uvicorn.Config(create_app(Settings()), host="127.0.0.1", port=0, log_level="warning")
     server = uvicorn.Server(config)
     thread = threading.Thread(target=server.run, daemon=True)
@@ -46,23 +46,16 @@ def browser():
 
 @pytest.fixture
 def page(browser, base_url):
-    """로그인 전 상태의 새 페이지. JS 예외와 콘솔 오류(CSP 위반, 404 포함)는 page.js_errors 에 쌓인다."""
+    """목록이 그려진 새 페이지. JS 예외와 콘솔 오류(CSP 위반, 404 포함)는 page.js_errors 에 쌓인다."""
     context = browser.new_context(viewport={"width": 1280, "height": 900}, locale="ko-KR", timezone_id="Asia/Seoul")
     pg = context.new_page()
     pg.js_errors = []
     pg.on("pageerror", lambda e: pg.js_errors.append(str(e)))
     pg.on("console", lambda m: m.type == "error" and pg.js_errors.append(m.text))
     pg.goto(base_url)
+    pg.wait_for_selector("#events-body tr")
     yield pg
     context.close()
-
-
-@pytest.fixture
-def logged_in(page):
-    page.fill("#login-email", "demo@example.test")
-    page.click("#login-form button[type=submit]")
-    page.wait_for_selector("#events-body tr")
-    return page
 
 
 @pytest.fixture(scope="session")
