@@ -3,12 +3,15 @@
 import base64
 import json
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 from server.main import Settings, create_app
 
-SUPA = dict(data_source="supabase", supabase_url="https://abc.supabase.co")
+SECRET = "sb_secret_unit_test_value"
+TOKEN = "unit-test-access-token-123"
+SUPA = dict(data_source="supabase", supabase_url="https://abc.supabase.co", service_key=SECRET, access_token=TOKEN)
 
 
 def _jwt(role):
@@ -47,25 +50,22 @@ def test_sample_config_has_no_supabase_values(client):
     assert _config_from(client) == {"dataSource": "sample"}
 
 
-def test_supabase_config_is_injected():
-    key = _jwt("anon")
-    c = TestClient(create_app(Settings(**SUPA, supabase_anon_key=key, signed_url_expires_s=60)))
-    cfg = _config_from(c)
-    assert cfg["dataSource"] == "supabase"
-    assert cfg["supabaseUrl"] == "https://abc.supabase.co"
-    assert cfg["supabaseAnonKey"] == key
-    assert cfg["signedUrlExpiresSec"] == 60
-    assert "https://abc.supabase.co" in c.get("/").headers["content-security-policy"]
+def test_supabase_config_has_no_secrets():
+    c = TestClient(create_app(Settings(**SUPA, signed_url_expires_s=60)))
+    c.get(f"/?token={TOKEN}")
+    body = c.get("/js/config.local.js").text
+    assert SECRET not in body and TOKEN not in body
+    assert _config_from(c) == {"dataSource": "supabase", "signedUrlExpiresSec": 60, "liveIntervalMs": 15000}
+    csp = c.get("/").headers["content-security-policy"]
+    assert "img-src 'self' data: blob: https://abc.supabase.co" in csp
+    assert "connect-src 'self';" in csp and "jsdelivr" not in csp  # 브라우저는 Supabase API 에 직접 접속하지 않음
+    assert SECRET not in repr(Settings(**SUPA))
 
 
-def test_publishable_key_is_allowed():
-    create_app(Settings(**SUPA, supabase_anon_key="sb_publishable_abc"))
-
-
-@pytest.mark.parametrize("key", [_jwt("service_role"), "sb_secret_abc"])
-def test_privileged_keys_are_rejected(key):
-    with pytest.raises(ValueError, match="anon 키만"):
-        create_app(Settings(**SUPA, supabase_anon_key=key))
+@pytest.mark.parametrize("key", [_jwt("anon"), "sb_publishable_abc"])
+def test_public_keys_are_rejected_as_service_key(key):
+    with pytest.raises(ValueError, match="secret"):
+        create_app(Settings(**{**SUPA, "service_key": key}))
 
 
 @pytest.mark.parametrize(
@@ -73,12 +73,67 @@ def test_privileged_keys_are_rejected(key):
     [
         dict(data_source="firebase"),
         dict(data_source="supabase"),
-        dict(data_source="supabase", supabase_url="http://abc.supabase.co", supabase_anon_key="sb_publishable_x"),
+        dict(**{**SUPA, "supabase_url": "http://abc.supabase.co"}),
+        dict(**{**SUPA, "access_token": "short"}),
+        dict(**{**SUPA, "service_key": ""}),
     ],
 )
 def test_invalid_settings_fail_fast(kwargs):
     with pytest.raises(ValueError):
         create_app(Settings(**kwargs))
+
+
+def test_token_required_and_exchanged_for_cookie():
+    c = TestClient(create_app(Settings(**SUPA)), follow_redirects=False)
+    assert c.get("/").status_code == 401
+    assert c.get("/api/devices").status_code == 401
+    assert c.get("/js/config.local.js").status_code == 401
+    assert c.get("/?token=wrong-token-0000000000").status_code == 401
+    assert c.get("/healthz").status_code == 200
+
+    r = c.get(f"/?token={TOKEN}")
+    assert r.status_code == 303 and r.headers["location"] == "/"
+    cookie = r.headers["set-cookie"].lower()
+    assert "httponly" in cookie and "samesite=strict" in cookie
+    assert c.get("/").status_code == 200
+
+
+def test_bearer_token_for_api_clients():
+    c = TestClient(create_app(Settings(**SUPA)))
+    assert c.get("/js/config.local.js", headers={"Authorization": f"Bearer {TOKEN}"}).status_code == 200
+    assert c.get("/js/config.local.js", headers={"Authorization": "Bearer nope"}).status_code == 401
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/api/events?from=2026-11-02", "/api/events?device=CAM_1", "/api/events?type=GLOVES_MISSING", "/api/events?limit=1000",
+     "/api/events/not-a-uuid", "/api/frames/1;drop", "/api/live?after=yesterday"],
+)
+def test_api_rejects_malformed_input_before_supabase(path):
+    calls = []
+    transport = httpx.MockTransport(lambda req: calls.append(req) or httpx.Response(200, json=[]))
+    c = TestClient(create_app(Settings(**SUPA), transport=transport), headers={"Authorization": f"Bearer {TOKEN}"})
+    assert c.get(path).status_code in (400, 422)
+    assert calls == []
+
+
+def test_supabase_auth_failure_is_reported_without_key():
+    transport = httpx.MockTransport(lambda req: httpx.Response(401, json={"message": "Invalid API key"}))
+    c = TestClient(create_app(Settings(**SUPA), transport=transport), headers={"Authorization": f"Bearer {TOKEN}"})
+    r = c.get("/api/devices")
+    assert r.status_code == 502 and "secret 키" in r.json()["detail"] and SECRET not in r.text
+
+
+def test_supabase_mode_without_token_is_open():
+    """내부망 전제: 토큰을 비우면 바로 보인다."""
+    c = TestClient(create_app(Settings(**{**SUPA, "access_token": ""})))
+    assert c.get("/").status_code == 200
+    assert _config_from(c)["dataSource"] == "supabase"
+
+
+def test_sample_mode_token_is_optional_but_enforced_when_set():
+    assert TestClient(create_app(Settings())).get("/").status_code == 200
+    assert TestClient(create_app(Settings(access_token=TOKEN))).get("/").status_code == 401
 
 
 def test_security_headers(client):
@@ -97,9 +152,11 @@ def test_settings_from_env():
             "DASHBOARD_RELOAD": "true",
             "DASHBOARD_DATA_SOURCE": "SUPABASE",
             "SUPABASE_URL": "https://abc.supabase.co/",
-            "SUPABASE_ANON_KEY": "sb_publishable_x",
+            "SUPABASE_SERVICE_KEY": SECRET,
+            "DASHBOARD_ACCESS_TOKEN": TOKEN,
         }
     )
     assert (s.bind_addr, s.port, s.reload, s.data_source) == ("0.0.0.0", 9000, True, "supabase")
     assert s.supabase_url == "https://abc.supabase.co"
+    assert (s.service_key, s.access_token) == (SECRET, TOKEN)
     assert Settings.from_env({}) == Settings()

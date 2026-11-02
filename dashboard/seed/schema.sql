@@ -36,30 +36,25 @@ on conflict (id) do update
   set public = false, file_size_limit = 1048576, allowed_mime_types = array['image/jpeg'];
 
 -- 3. RLS ----------------------------------------------------------------------
--- 대시보드는 로그인 없이 토큰(anon key)으로 요청한다. 토큰 없는 요청은 PostgREST/Storage 단계에서 거부된다.
--- 쓰기 정책은 두지 않는다 → 업로드는 RLS를 우회하는 service_role(cloud-sync, seed 스크립트)만 가능.
+-- anon / authenticated 에는 아무 정책도 두지 않는다 → publishable 키로는 행·객체 모두 접근 불가(cloud/README.md §3).
+-- 조회는 대시보드 서버, 업로드는 cloud-sync·seed 가 secret(service_role) 키로 한다(RLS 우회, 키는 서버에만).
 alter table public.ppe_events enable row level security;
 
+-- 이전 버전 스크립트가 만든 anon 조회 정책 제거
 drop policy if exists "dashboard read ppe_events" on public.ppe_events;
-create policy "dashboard read ppe_events"
-  on public.ppe_events for select
-  to anon, authenticated
-  using (true);
-
--- Signed URL 발급(createSignedUrl)에는 객체 select 권한이 필요하다. 버킷은 계속 비공개.
 drop policy if exists "dashboard sign ppe-evidence" on storage.objects;
-create policy "dashboard sign ppe-evidence"
-  on storage.objects for select
-  to anon, authenticated
-  using (bucket_id = 'ppe-evidence');
 
--- 4. Realtime(선택: 대시보드 "실시간" 토글) -------------------------------------
+-- 4. Realtime 불필요 ------------------------------------------------------------
+-- 대시보드 실시간 토글은 서버 폴링(ingested_at)으로 동작한다. 이전에 추가했다면 제거.
 do $$
 begin
-  if not exists (
+  if exists (
     select 1 from pg_publication_tables
     where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'ppe_events'
   ) then
-    alter publication supabase_realtime add table public.ppe_events;
+    alter publication supabase_realtime drop table public.ppe_events;
   end if;
 end $$;
+
+-- 5. 실시간 폴링용 인덱스 -------------------------------------------------------
+create index if not exists ppe_events_ingested_at_idx on public.ppe_events (ingested_at);

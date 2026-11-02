@@ -1,20 +1,15 @@
 // 대시보드 런타임 설정.
-// 이 파일에는 비밀 값을 넣지 않는다. 실제 Supabase 값은 config.local.js(커밋 금지)에서 덮어쓴다.
+// 이 파일에는 비밀 값을 넣지 않는다. 서버가 /js/config.local.js 로 환경변수 값을 덮어쓴다(비밀 값 없음).
 window.PPE = window.PPE || {};
 
 window.PPE.config = Object.assign(
   {
-    // "sample" = 브라우저에서 생성하는 샘플 데이터, "supabase" = 실제 ppe_events / ppe-evidence 조회
+    // "sample" = 브라우저에서 생성하는 샘플 데이터
+    // "supabase" = 대시보드 서버 /api 경유로 실제 ppe_events / ppe-evidence 조회(키는 서버에만)
     dataSource: "sample",
 
-    // dataSource === "supabase" 일 때만 사용. anon key만 허용(service_role 금지).
-    supabaseUrl: "",
-    supabaseAnonKey: "",
-    supabaseJsUrl: "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js",
-
-    table: "ppe_events",
-    storageBucket: "ppe-evidence",
     signedUrlExpiresSec: 120,
+    liveIntervalMs: 15000, // supabase 모드 실시간 폴링 주기
 
     pageSize: 20,
 
