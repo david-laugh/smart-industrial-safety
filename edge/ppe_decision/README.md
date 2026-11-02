@@ -33,7 +33,7 @@ events = decision.update(edge_frame, inference_result, jpeg)
 
 상세: [docs/protocols.md §4, §시간 규칙](../../docs/protocols.md)
 
-## 판정 정책 (policy `0.0.0`)
+## 판정 정책 (policy `0.1.0`)
 
 1. **같은 사람**: 추적기 없음. bbox 중심을 `PPE_DEDUP_GRID`(가로x세로, 기본 4x4)로 양자화한 셀 `pos:r{행}c{열}`.
    격자 경계 떨림을 막기 위해, 해당 장치에서 추적 중인 셀의 마지막 중심과 `PPE_CELL_STICKY_DIST`(격자 단위, 기본 0.5) 이내면 그 셀을 재사용.
@@ -57,7 +57,7 @@ events = decision.update(edge_frame, inference_result, jpeg)
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
-| `PPE_POLICY_VERSION` | `0.0.0` | |
+| `PPE_POLICY_VERSION` | `0.1.0` | |
 | `PPE_DECISION_WINDOW_FRAMES` | 5 | |
 | `PPE_DECISION_MIN_MISSING_FRAMES` | 3 | 1 ≤ 값 ≤ WINDOW |
 | `PPE_UNKNOWN_IS_VIOLATION` | false | |

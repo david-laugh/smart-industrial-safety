@@ -34,7 +34,7 @@ def _bool(v: Optional[str], default: bool) -> bool:
 
 @dataclass(frozen=True)
 class DecisionConfig:
-    policy_version: str = "0.0.0"
+    policy_version: str = "0.1.0"
     window_frames: int = 5
     min_missing_frames: int = 3
     unknown_is_violation: bool = False
