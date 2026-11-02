@@ -79,7 +79,7 @@ ultralytics/onnx 버전이 달라지면 같은 `.pt` 에서도 sha256 이 달라
 | 안전모 영역 | 사람 박스 높이 상단 0~25% (가로 전체) | `INFERENCE_HELMET_REGION` |
 | 조끼 영역 | 사람 박스 높이 20~70% | `INFERENCE_VEST_REGION` |
 | 연관 조건 | PPE 박스 중심이 영역 안 AND IoA(PPE∩영역 / PPE 면적) ≥ 0.5 | `INFERENCE_ASSOC_MIN_IOA` |
-| PPE 할당 | 판정 가능한 사람 중 IoA 가 가장 큰 1명에게만 | — |
+| PPE 할당 | 판정 가능한 사람 중 IoA 가 가장 큰 1명에게만. IoA 동점이면 PPE 중심이 사람 박스 가로 중심에 더 가까운 사람(앞뒤로 겹친 사람의 머리 오연관 방지) | — |
 | 사람 신뢰도 하한 | 0.5 | `INFERENCE_PERSON_MIN_CONFIDENCE` |
 | 착용 / 미착용 임계값 | 0.5 / 0.5 | `INFERENCE_PPE_WORN_MIN_CONFIDENCE` / `..._MISSING_...` |
 | 최소 사람 박스 높이 | 이미지 높이 × 0.25 (px 설정 시 px 우선) | `INFERENCE_MIN_PERSON_BOX_RATIO` / `..._PX` |

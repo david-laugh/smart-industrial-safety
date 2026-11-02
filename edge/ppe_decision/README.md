@@ -43,8 +43,10 @@ events = decision.update(edge_frame, inference_result, jpeg)
    항목별 MISSING 수 ≥ `PPE_DECISION_MIN_MISSING_FRAMES`(3) **이고 현재 프레임도 MISSING** 이면 확정(증거 이미지에 위반이 보이도록).
    UNKNOWN 은 `PPE_UNKNOWN_IS_VIOLATION=true` 일 때만 MISSING 으로 센다. 같은 셀에 여러 명이면 MISSING > WORN > UNKNOWN.
 3. **이벤트 단위**: 위반자 1명 = 이벤트 1건(자기 `event_id`, `dedup_key`, `violations` 1개, event_id 별 증거 JPEG).
-4. **dedup**: `dedup_key = {device_id}|pos:r{r}c{c}|{정렬된 유형 ,연결}|{floor(t/W)*W}` (t = occurred_at epoch 초, W = `PPE_DEDUP_WINDOW_S`).
-   같은 (장치, 셀, 유형)은 마지막 발행 후 W초 동안 재발행하지 않음(버킷 경계를 넘어도 억제). 유형 조합이 바뀌면 새 이벤트.
+4. **dedup**: 억제 상태는 (장치, 셀, **위반 유형**) 단위. 같은 유형은 마지막 발행 후 W초(`PPE_DEDUP_WINDOW_S`) 동안 재발행하지 않음(버킷 경계를 넘어도 억제).
+   이벤트에는 이번에 새로 확정됐고 억제되지 않은 유형만 넣고, 동시에 확정된 유형은 한 이벤트로 묶는다. 새 유형이 없으면 이벤트 없음
+   (예: HELMET 발행 후 VEST 가 나중에 확정 → `VEST_MISSING` 만 담은 이벤트 1건 추가).
+   `dedup_key = {device_id}|pos:r{r}c{c}|{이벤트에 들어간 유형 정렬 ,연결}|{floor(t/W)*W}` (t = occurred_at epoch 초).
 5. **결정적 동작**: 같은 입력 시퀀스 → 같은 판정. `event_id`(`id_fn`)와 `decided_at_utc`(`now_fn`)는 주입 가능.
 6. **시간**: `capture_ts_utc` 가 있고 `|capture − gateway_received| ≤ TIME_MAX_DEVICE_SKEW_MS` → `DEVICE_SNTP`, 아니면 `GATEWAY_RECEIVED`.
 7. **spool**: `spool/tmp/*.part` 에 쓰기+fsync → rename. JPEG 먼저, JSON 나중. 게시 실패 시 해당 이벤트는 dedup 에 기록하지 않아 다음 프레임에서 재발행.

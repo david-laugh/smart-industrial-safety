@@ -192,10 +192,40 @@ def test_dedup_suppresses_across_bucket_boundary():
     assert n == 1
 
 
+def _types_and_keys(evs):
+    return [(i, e["violations"][0]["violation_types"], e["decision"]["dedup_key"].split("|")[2])
+            for i, e in enumerate(evs) if e is not None]
+
+
 def test_different_violation_types_are_separate_keys():
+    """억제는 유형 단위: HELMET 발행 후 VEST 가 확정되면 VEST 만 담은 이벤트가 추가된다."""
     seq = [[person(0, "MISSING", "WORN")]] * 3 + [[person(0, "MISSING", "MISSING")]] * 3
     evs = run(decider(), seq)
-    assert [i for i, e in enumerate(evs) if e is not None] == [2, 5]
+    assert _types_and_keys(evs) == [(2, ["HELMET_MISSING"], "HELMET_MISSING"),
+                                    (5, ["VEST_MISSING"], "VEST_MISSING")]
+
+
+def test_helmet_first_then_vest_later():
+    seq = ([[person(0, "MISSING", "WORN")]] * 6 + [[person(0, "MISSING", "MISSING")]] * 10)
+    evs = run(decider(), seq)
+    got = _types_and_keys(evs)
+    assert got == [(2, ["HELMET_MISSING"], "HELMET_MISSING"), (8, ["VEST_MISSING"], "VEST_MISSING")]
+    vest_ev = evs[8]["violations"][0]
+    assert vest_ev["helmet"]["status"] == "MISSING" and vest_ev["vest"]["status"] == "MISSING"
+
+
+def test_both_confirmed_together_one_event():
+    evs = run(decider(), [[person(0, "MISSING", "MISSING")]] * 20)
+    got = _types_and_keys(evs)
+    assert got == [(2, ["HELMET_MISSING", "VEST_MISSING"], "HELMET_MISSING,VEST_MISSING")]
+
+
+def test_helmet_repeated_suppressed_then_reissued_after_window():
+    # 2fps 70프레임(35초) 연속 HELMET 미착용, 중간에 VEST 가 잠깐 확정돼도 HELMET 은 다시 나오지 않음
+    seq = [[person(0, "MISSING", "WORN")]] * 20 + [[person(0, "MISSING", "MISSING")]] * 5 +           [[person(0, "MISSING", "WORN")]] * 45
+    evs = run(decider(), seq)
+    got = [(i, t) for i, t, _ in _types_and_keys(evs)]
+    assert got == [(2, ["HELMET_MISSING"]), (22, ["VEST_MISSING"]), (62, ["HELMET_MISSING"])]
 
 
 def test_sticky_cell_across_grid_boundary():
