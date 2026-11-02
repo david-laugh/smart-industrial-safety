@@ -15,10 +15,26 @@ ROOT = Path(__file__).resolve().parents[3]
 MODEL = ROOT / "edge/inference/models/ppe_yolov8n_640.onnx"
 FRAMES = sorted((ROOT / "edge/inference/_dev/frames/esp32").glob("*.jpg"))
 
+def _dev_frames_match(frames):
+    """dev 프레임이 B 원본(tests/dev_frames.sha256)과 같은지. 다르면 (False, 이유)."""
+    manifest = {}
+    for line in (ROOT / "edge/inference/tests/dev_frames.sha256").read_text(encoding="utf-8").splitlines():
+        if line.strip() and not line.startswith("#"):
+            digest, name = line.split(maxsplit=1)
+            manifest[name.strip()] = digest
+    for f in frames:
+        if manifest.get(f.name) != hashlib.sha256(f.read_bytes()).hexdigest():
+            return False, f"dev frame {f.name} differs from B's original (dev_frames.sha256)"
+    return True, ""
+
+
 pytestmark = pytest.mark.skipif(not MODEL.exists() or not FRAMES, reason="model or dev frames not present")
 
 
 def test_pipeline_process_publishes_one_event_per_violator(tmp_path):
+    ok, why = _dev_frames_match(FRAMES[:4])
+    if not ok:
+        pytest.skip(why)
     pipe = PPEPipeline.from_env({"INFERENCE_MODEL_PATH": str(MODEL), "EVENT_DATA_ROOT": str(tmp_path)})
     tmpl = json.loads((ROOT / "contracts/examples/edge-frame.example.json").read_text(encoding="utf-8"))
     t0 = datetime(2026, 11, 2, 1, 0, 0, tzinfo=timezone.utc)

@@ -1,0 +1,7 @@
+# 런타임 의존성 (edge.gateway). 하한만 지정, 고정은 Pi 5/Docker Python 버전 확정 후.
+# 2-컨테이너 모드에서는 edge/inference/requirements.txt 와 함께 설치한다(PPEPipeline 을 같은 프로세스에서 실행).
+fastapi>=0.115
+uvicorn>=0.30
+python-multipart>=0.0.18
+jsonschema>=4.18
+referencing>=0.30
