@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0.0",
+  "accepted": false,
+  "frame_id": null,
+  "gateway_received_at_utc": "2026-11-02T01:23:46.002Z",
+  "queue_depth": 4,
+  "retry_after_ms": 1000,
+  "error": {
+    "code": "QUEUE_FULL",
+    "message": "inference queue is full"
+  }
+}

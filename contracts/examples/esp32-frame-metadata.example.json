@@ -1,0 +1,29 @@
+{
+  "schema_version": "1.0.0",
+  "device_id": "cam-line-a-01",
+  "boot_id": "5f3a9c21",
+  "frame_seq": 1024,
+  "mcu_uptime_ms": 3600123,
+  "time_sync": {
+    "synced": true,
+    "source": "SNTP",
+    "capture_ts_utc": "2026-11-02T01:23:45.120Z"
+  },
+  "trigger": "EDGE_PERSON_DETECTED",
+  "image": {
+    "content_type": "image/jpeg",
+    "width": 640,
+    "height": 480,
+    "byte_length": 40960,
+    "jpeg_quality": 12,
+    "frame_size": "VGA"
+  },
+  "edge_detection": {
+    "enabled": true,
+    "person_detected": true,
+    "person_score": 0.8,
+    "model_id": "ei-person-fomo-placeholder",
+    "latency_ms": null
+  },
+  "firmware_version": "0.0.0-skeleton"
+}

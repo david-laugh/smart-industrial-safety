@@ -1,0 +1,51 @@
+{
+  "schema_version": "1.0.0",
+  "event_id": "019a4a3c-8a10-7f00-8b5c-4d2e9a7b1c33",
+  "event_type": "PPE_VIOLATION",
+  "device_id": "cam-line-a-01",
+  "frame_id": "019a4a3c-7e2b-7c41-9d3e-2f6a1b8c0d11",
+  "boot_id": "5f3a9c21",
+  "frame_seq": 1024,
+  "timestamps": {
+    "occurred_at_utc": "2026-11-02T01:23:45.120Z",
+    "occurred_at_source": "DEVICE_SNTP",
+    "capture_ts_utc": "2026-11-02T01:23:45.120Z",
+    "mcu_uptime_ms": 3600123,
+    "gateway_received_at_utc": "2026-11-02T01:23:45.180Z",
+    "gateway_clock_synced": true,
+    "decided_at_utc": "2026-11-02T01:23:46.010Z"
+  },
+  "violations": [
+    {
+      "person_index": 0,
+      "track_id": null,
+      "bbox": { "x_min": 0.21, "y_min": 0.10, "x_max": 0.45, "y_max": 0.95 },
+      "helmet": { "status": "MISSING", "confidence": 0.7 },
+      "vest": { "status": "WORN", "confidence": 0.8 },
+      "violation_types": ["HELMET_MISSING"]
+    }
+  ],
+  "image": {
+    "image_path": "images/2026/11/02/019a4a3c-8a10-7f00-8b5c-4d2e9a7b1c33.jpg",
+    "content_type": "image/jpeg",
+    "byte_length": 40960,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "width": 640,
+    "height": 480
+  },
+  "model": {
+    "name": "ppe-detector-placeholder",
+    "version": "0.0.0",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "input_width": 640,
+    "input_height": 640,
+    "runtime": "onnxruntime",
+    "runtime_version": "TBD"
+  },
+  "decision": {
+    "policy_version": "0.0.0",
+    "dedup_key": "cam-line-a-01|pos:r2c1|HELMET_MISSING|1793582610",
+    "dedup_window_s": 30,
+    "frames_considered": 3
+  }
+}

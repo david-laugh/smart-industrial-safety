@@ -1,0 +1,9 @@
+{
+  "schema_version": "1.0.0",
+  "accepted": true,
+  "frame_id": "019a4a3c-7e2b-7c41-9d3e-2f6a1b8c0d11",
+  "gateway_received_at_utc": "2026-11-02T01:23:45.180Z",
+  "queue_depth": 1,
+  "retry_after_ms": null,
+  "error": null
+}

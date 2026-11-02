@@ -1,0 +1,41 @@
+# 비밀 정보 / 로컬 환경
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# 모델 가중치 및 변환 산출물 (저장소에 포함하지 않음, edge/inference/models/README.md 참고)
+*.onnx
+*.ort
+*.tflite
+*.pt
+*.pth
+*.engine
+*.eim
+
+# 런타임 데이터 (이벤트, 이미지, SQLite)
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# 측정 원시 데이터 (요약 보고서만 커밋, tests/performance/README.md 참고)
+tests/performance/results/**/raw/
+tests/memory/results/**/raw/
+
+# ESP-IDF / PlatformIO 빌드 산출물
+firmware/esp32-s3/build/
+firmware/esp32-s3/.pio/
+firmware/esp32-s3/sdkconfig.old
+
+# 일반
+__pycache__/
+*.pyc
+.venv/
+node_modules/
+dist/
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

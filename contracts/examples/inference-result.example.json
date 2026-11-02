@@ -1,0 +1,39 @@
+{
+  "schema_version": "1.0.0",
+  "frame_id": "019a4a3c-7e2b-7c41-9d3e-2f6a1b8c0d11",
+  "device_id": "cam-line-a-01",
+  "image_size": { "width": 640, "height": 480 },
+  "model": {
+    "name": "ppe-detector-placeholder",
+    "version": "0.0.0",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "input_width": 640,
+    "input_height": 640,
+    "runtime": "onnxruntime",
+    "runtime_version": "TBD"
+  },
+  "timing": {
+    "decode_ms": 0,
+    "preprocess_ms": 0,
+    "inference_ms": 0,
+    "postprocess_ms": 0
+  },
+  "persons": [
+    {
+      "person_index": 0,
+      "track_id": null,
+      "bbox": { "x_min": 0.21, "y_min": 0.10, "x_max": 0.45, "y_max": 0.95 },
+      "person_confidence": 0.9,
+      "helmet": { "status": "MISSING", "confidence": 0.7 },
+      "vest": { "status": "WORN", "confidence": 0.8 }
+    },
+    {
+      "person_index": 1,
+      "track_id": null,
+      "bbox": { "x_min": 0.60, "y_min": 0.30, "x_max": 0.72, "y_max": 0.70 },
+      "person_confidence": 0.6,
+      "helmet": { "status": "UNKNOWN", "confidence": null },
+      "vest": { "status": "UNKNOWN", "confidence": null }
+    }
+  ]
+}

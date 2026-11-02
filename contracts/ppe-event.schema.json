@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ppe-safety.local/contracts/ppe-event.schema.json",
+  "title": "PPE violation event",
+  "description": "인터페이스 4 (PPE Decision → Cloud Sync). 버전이 있는 미착용 이벤트. event_id 는 Decision 단계에서 한 번 생성되며 로컬 저장, 재시도, 재전송 전 과정에서 절대 바뀌지 않는다.",
+  "type": "object",
+  "required": [
+    "schema_version", "event_id", "event_type", "device_id", "frame_id", "boot_id", "frame_seq",
+    "timestamps", "violations", "image", "model", "decision"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "$ref": "common.schema.json#/$defs/schemaVersion" },
+    "event_id": { "$ref": "common.schema.json#/$defs/uuid" },
+    "event_type": { "type": "string", "enum": ["PPE_VIOLATION"] },
+    "device_id": { "$ref": "common.schema.json#/$defs/deviceId" },
+    "frame_id": {
+      "description": "증거 이미지로 선택된 대표 프레임.",
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "boot_id": { "$ref": "common.schema.json#/$defs/bootId" },
+    "frame_seq": { "$ref": "common.schema.json#/$defs/frameSeq" },
+    "timestamps": {
+      "type": "object",
+      "required": [
+        "occurred_at_utc", "occurred_at_source", "capture_ts_utc", "mcu_uptime_ms",
+        "gateway_received_at_utc", "gateway_clock_synced", "decided_at_utc"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "occurred_at_utc": {
+          "description": "대시보드 정렬 기준 시각. occurred_at_source 규칙으로 결정한다.",
+          "$ref": "common.schema.json#/$defs/utcTimestamp"
+        },
+        "occurred_at_source": {
+          "description": "DEVICE_SNTP=ESP32 촬영 시각 사용, GATEWAY_RECEIVED=Pi 수신 시각 사용. 규칙은 docs/protocols.md §시간 규칙.",
+          "type": "string",
+          "enum": ["DEVICE_SNTP", "GATEWAY_RECEIVED"]
+        },
+        "capture_ts_utc": {
+          "anyOf": [{ "$ref": "common.schema.json#/$defs/utcTimestamp" }, { "type": "null" }]
+        },
+        "mcu_uptime_ms": { "$ref": "common.schema.json#/$defs/mcuUptimeMs" },
+        "gateway_received_at_utc": { "$ref": "common.schema.json#/$defs/utcTimestamp" },
+        "gateway_clock_synced": { "type": "boolean" },
+        "decided_at_utc": { "$ref": "common.schema.json#/$defs/utcTimestamp" }
+      }
+    },
+    "violations": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": { "$ref": "#/$defs/violation" }
+    },
+    "image": {
+      "description": "로컬 증거 이미지. 파일 경로만 참조하며 이미지 바이트를 포함하지 않는다.",
+      "type": "object",
+      "required": ["image_path", "content_type", "byte_length", "sha256", "width", "height"],
+      "additionalProperties": false,
+      "properties": {
+        "image_path": { "$ref": "common.schema.json#/$defs/relativeImagePath" },
+        "content_type": { "const": "image/jpeg" },
+        "byte_length": { "type": "integer", "minimum": 1, "maximum": 1048576 },
+        "sha256": { "$ref": "common.schema.json#/$defs/sha256Hex" },
+        "width": { "type": "integer", "minimum": 1, "maximum": 4096 },
+        "height": { "type": "integer", "minimum": 1, "maximum": 4096 }
+      }
+    },
+    "model": { "$ref": "common.schema.json#/$defs/modelInfo" },
+    "decision": {
+      "description": "판정 정책 추적 정보.",
+      "type": "object",
+      "required": ["policy_version", "dedup_key", "dedup_window_s", "frames_considered"],
+      "additionalProperties": false,
+      "properties": {
+        "policy_version": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "dedup_key": {
+          "description": "의미적 중복 억제 키. 형식은 docs/protocols.md §중복 방지.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "dedup_window_s": { "type": "integer", "minimum": 0, "maximum": 3600 },
+        "frames_considered": {
+          "description": "판정에 사용된 연속 프레임 수(시간적 평활화).",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  },
+  "$defs": {
+    "violationType": {
+      "type": "string",
+      "enum": ["HELMET_MISSING", "VEST_MISSING"]
+    },
+    "violation": {
+      "description": "위반으로 판정된 사람 1명. UNKNOWN 만 있는 사람은 기본 정책상 위반에 포함하지 않는다.",
+      "type": "object",
+      "required": ["person_index", "track_id", "bbox", "helmet", "vest", "violation_types"],
+      "additionalProperties": false,
+      "properties": {
+        "person_index": { "type": "integer", "minimum": 0 },
+        "track_id": { "type": ["string", "null"], "maxLength": 64 },
+        "bbox": { "$ref": "common.schema.json#/$defs/bboxNormalized" },
+        "helmet": { "$ref": "common.schema.json#/$defs/ppeItemResult" },
+        "vest": { "$ref": "common.schema.json#/$defs/ppeItemResult" },
+        "violation_types": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/violationType" }
+        }
+      }
+    }
+  }
+}

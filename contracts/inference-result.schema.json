@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ppe-safety.local/contracts/inference-result.schema.json",
+  "title": "Inference result",
+  "description": "인터페이스 3 (Inference → PPE Decision). 프레임 1장에 대한 사람별 PPE 상태. 사람이 없으면 persons 는 빈 배열.",
+  "type": "object",
+  "required": ["schema_version", "frame_id", "device_id", "image_size", "model", "timing", "persons"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "$ref": "common.schema.json#/$defs/schemaVersion" },
+    "frame_id": { "$ref": "common.schema.json#/$defs/uuid" },
+    "device_id": { "$ref": "common.schema.json#/$defs/deviceId" },
+    "image_size": { "$ref": "common.schema.json#/$defs/imageDimensions" },
+    "model": { "$ref": "common.schema.json#/$defs/modelInfo" },
+    "timing": {
+      "description": "해당 프레임에서 실제 측정한 단계별 소요 시간(ms). 벤치마크 원천 데이터로 사용한다.",
+      "type": "object",
+      "required": ["decode_ms", "preprocess_ms", "inference_ms", "postprocess_ms"],
+      "additionalProperties": false,
+      "properties": {
+        "decode_ms": { "type": "number", "minimum": 0 },
+        "preprocess_ms": { "type": "number", "minimum": 0 },
+        "inference_ms": { "type": "number", "minimum": 0 },
+        "postprocess_ms": { "type": "number", "minimum": 0 }
+      }
+    },
+    "persons": {
+      "type": "array",
+      "maxItems": 64,
+      "items": { "$ref": "#/$defs/person" }
+    }
+  },
+  "$defs": {
+    "person": {
+      "type": "object",
+      "required": ["person_index", "track_id", "bbox", "person_confidence", "helmet", "vest"],
+      "additionalProperties": false,
+      "properties": {
+        "person_index": {
+          "description": "프레임 내 사람 순번(0부터).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "track_id": {
+          "description": "프레임 간 추적 ID. 추적기를 쓰지 않으면 null.",
+          "type": ["string", "null"],
+          "maxLength": 64
+        },
+        "bbox": { "$ref": "common.schema.json#/$defs/bboxNormalized" },
+        "person_confidence": { "$ref": "common.schema.json#/$defs/confidence" },
+        "helmet": { "$ref": "common.schema.json#/$defs/ppeItemResult" },
+        "vest": { "$ref": "common.schema.json#/$defs/ppeItemResult" }
+      }
+    }
+  }
+}

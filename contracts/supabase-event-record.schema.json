@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ppe-safety.local/contracts/supabase-event-record.schema.json",
+  "title": "Supabase ppe_events row payload",
+  "description": "인터페이스 5 (Cloud Sync → Supabase). public.ppe_events 테이블에 upsert 하는 행. event_id 가 기본키이며 on_conflict=event_id + ignore-duplicates 로 멱등 업로드한다. 서버 생성 컬럼(ingested_at)은 포함하지 않는다.",
+  "type": "object",
+  "required": [
+    "event_id", "schema_version", "device_id", "occurred_at", "occurred_at_source",
+    "gateway_received_at", "decided_at", "violation_count", "violation_types",
+    "storage_bucket", "storage_path", "image_sha256", "model_name", "model_version", "event_payload"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "event_id": { "$ref": "common.schema.json#/$defs/uuid" },
+    "schema_version": { "$ref": "common.schema.json#/$defs/schemaVersion" },
+    "device_id": { "$ref": "common.schema.json#/$defs/deviceId" },
+    "occurred_at": { "$ref": "common.schema.json#/$defs/utcTimestamp" },
+    "occurred_at_source": { "type": "string", "enum": ["DEVICE_SNTP", "GATEWAY_RECEIVED"] },
+    "gateway_received_at": { "$ref": "common.schema.json#/$defs/utcTimestamp" },
+    "decided_at": { "$ref": "common.schema.json#/$defs/utcTimestamp" },
+    "violation_count": { "type": "integer", "minimum": 1, "maximum": 64 },
+    "violation_types": {
+      "description": "event_payload.violations 의 violation_types 합집합(필터링용 비정규화 컬럼).",
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "ppe-event.schema.json#/$defs/violationType" }
+    },
+    "storage_bucket": {
+      "description": "비공개 버킷 이름.",
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{2,62}$"
+    },
+    "storage_path": {
+      "description": "버킷 내 객체 경로: {device_id}/{yyyy}/{mm}/{dd}/{event_id}.jpg (날짜는 occurred_at UTC 기준).",
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{2,63}/[0-9]{4}/[0-9]{2}/[0-9]{2}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.jpg$"
+    },
+    "image_sha256": { "$ref": "common.schema.json#/$defs/sha256Hex" },
+    "model_name": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "model_version": { "type": "string", "minLength": 1, "maxLength": 32 },
+    "event_payload": {
+      "description": "원본 이벤트 JSON 전체(jsonb). 감사 및 스키마 진화 대응용.",
+      "$ref": "ppe-event.schema.json"
+    }
+  }
+}

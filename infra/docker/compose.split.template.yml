@@ -1,0 +1,78 @@
+# =============================================================================
+# TEMPLATE ONLY — 실행용 파일이 아니다.
+# - 선택 배포: 컨테이너 3개 (gateway, inference, cloud-sync)
+# - 언제 쓰는가: docs/architecture.md §4.2
+# - gateway → inference: 공유 볼륨의 Unix domain socket으로 edge-frame JSON + JPEG 바이트 전송
+#   (길이 접두 프레임, Base64 금지 — docs/protocols.md §2)
+# - 메모리 값은 측정 전 초기 예산이다. 합계 gateway 256m + inference 1600m = 1856m
+#   (기본안 edge-core 1900m 이하). 런타임 중복 적재로 실사용량은 늘 수 있으므로 측정 필수.
+# =============================================================================
+
+name: ppe-safety-split
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  gateway:
+    image: ${GATEWAY_IMAGE:?set GATEWAY_IMAGE}
+    platform: linux/arm64
+    restart: unless-stopped
+    env_file: .env
+    mem_limit: 256m
+    memswap_limit: 256m
+    pids_limit: 64
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=16m
+    ports:
+      - "${GATEWAY_BIND_ADDR:-0.0.0.0}:${GATEWAY_PORT:-8080}:8080"
+    volumes:
+      - ipc-socket:/run/ppe     # INFERENCE_SOCKET_PATH
+    logging: *default-logging
+
+  inference:
+    # inference + ppe_decision
+    image: ${INFERENCE_IMAGE:?set INFERENCE_IMAGE}
+    platform: linux/arm64
+    restart: unless-stopped
+    env_file: .env
+    mem_limit: 1600m
+    memswap_limit: 1600m
+    pids_limit: 128
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=48m
+    volumes:
+      - ipc-socket:/run/ppe
+      - ppe-data:/data
+      - ${MODEL_DIR:-./models}:/models:ro
+    logging: *default-logging
+
+  cloud-sync:
+    image: ${CLOUD_SYNC_IMAGE:?set CLOUD_SYNC_IMAGE}
+    platform: linux/arm64
+    restart: unless-stopped
+    env_file: .env
+    mem_limit: 192m
+    memswap_limit: 192m
+    pids_limit: 64
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=16m
+    volumes:
+      - ppe-data:/data
+    logging: *default-logging
+
+volumes:
+  ppe-data:
+  ipc-socket:

@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ppe-safety.local/contracts/edge-frame.schema.json",
+  "title": "Edge internal frame object",
+  "description": "인터페이스 2 (Gateway → Inference). 2-컨테이너 배포에서는 프로세스 내부 객체의 논리 필드 정의이며, 3-컨테이너 분리 배포에서는 이 JSON 과 JPEG 바이트를 별도 프레임으로 전송한다(Base64 금지).",
+  "type": "object",
+  "required": [
+    "schema_version", "frame_id", "device_id", "boot_id", "frame_seq", "mcu_uptime_ms",
+    "capture_ts_utc", "gateway_received_at_utc", "gateway_clock_synced", "image", "edge_detection", "selection"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "$ref": "common.schema.json#/$defs/schemaVersion" },
+    "frame_id": { "$ref": "common.schema.json#/$defs/uuid" },
+    "device_id": { "$ref": "common.schema.json#/$defs/deviceId" },
+    "boot_id": { "$ref": "common.schema.json#/$defs/bootId" },
+    "frame_seq": { "$ref": "common.schema.json#/$defs/frameSeq" },
+    "mcu_uptime_ms": { "$ref": "common.schema.json#/$defs/mcuUptimeMs" },
+    "capture_ts_utc": {
+      "description": "ESP32 가 SNTP 동기화된 경우의 촬영 시각. 그대로 전달하며 Gateway 가 보정하지 않는다.",
+      "anyOf": [{ "$ref": "common.schema.json#/$defs/utcTimestamp" }, { "type": "null" }]
+    },
+    "gateway_received_at_utc": { "$ref": "common.schema.json#/$defs/utcTimestamp" },
+    "gateway_clock_synced": {
+      "description": "수신 시점에 Raspberry Pi 시계가 NTP 동기화 상태였는지 여부.",
+      "type": "boolean"
+    },
+    "image": {
+      "type": "object",
+      "required": ["encoding", "width", "height", "byte_length", "sha256", "location"],
+      "additionalProperties": false,
+      "properties": {
+        "encoding": { "const": "jpeg" },
+        "width": { "type": "integer", "minimum": 1, "maximum": 4096 },
+        "height": { "type": "integer", "minimum": 1, "maximum": 4096 },
+        "byte_length": { "type": "integer", "minimum": 1, "maximum": 1048576 },
+        "sha256": { "$ref": "common.schema.json#/$defs/sha256Hex" },
+        "location": {
+          "description": "JPEG 바이트가 있는 위치. 기본 배포는 IN_MEMORY.",
+          "type": "object",
+          "required": ["kind", "path"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "type": "string", "enum": ["IN_MEMORY", "UNIX_SOCKET_STREAM", "SHARED_MEMORY", "FILE"] },
+            "path": { "type": ["string", "null"], "maxLength": 255 }
+          }
+        }
+      }
+    },
+    "edge_detection": {
+      "description": "ESP32 메타데이터의 edge_detection 을 그대로 복사. 미제공 시 null.",
+      "anyOf": [
+        { "type": "null" },
+        { "$ref": "esp32-frame-metadata.schema.json#/properties/edge_detection" }
+      ]
+    },
+    "selection": {
+      "description": "프레임 선별기 결정 정보.",
+      "type": "object",
+      "required": ["reason", "queue_depth_at_enqueue", "dropped_since_last_selected"],
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "type": "string",
+          "enum": ["EDGE_PERSON_HINT", "SAMPLING_INTERVAL", "LATEST_FRAME", "MANUAL"]
+        },
+        "queue_depth_at_enqueue": { "type": "integer", "minimum": 0 },
+        "dropped_since_last_selected": {
+          "description": "같은 device_id 에서 직전 선별 프레임 이후 버려진 프레임 수.",
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

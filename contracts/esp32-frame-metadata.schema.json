@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ppe-safety.local/contracts/esp32-frame-metadata.schema.json",
+  "title": "ESP32 frame upload metadata",
+  "description": "인터페이스 1 (ESP32-S3 → Gateway). HTTP multipart/form-data 의 'metadata' 파트(application/json). JPEG 바이너리는 별도의 'image' 파트(image/jpeg)로 전송하며 이 JSON 에 Base64 로 넣지 않는다.",
+  "type": "object",
+  "required": ["schema_version", "device_id", "boot_id", "frame_seq", "mcu_uptime_ms", "time_sync", "trigger", "image", "firmware_version"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "$ref": "common.schema.json#/$defs/schemaVersion" },
+    "device_id": { "$ref": "common.schema.json#/$defs/deviceId" },
+    "boot_id": { "$ref": "common.schema.json#/$defs/bootId" },
+    "frame_seq": { "$ref": "common.schema.json#/$defs/frameSeq" },
+    "mcu_uptime_ms": { "$ref": "common.schema.json#/$defs/mcuUptimeMs" },
+    "time_sync": {
+      "description": "MCU 측 벽시계 동기화 상태. 동기화되지 않았으면 capture_ts_utc 는 null 이고 Gateway 수신 시각을 기준으로 사용한다.",
+      "type": "object",
+      "required": ["synced", "source", "capture_ts_utc"],
+      "additionalProperties": false,
+      "properties": {
+        "synced": { "type": "boolean" },
+        "source": { "type": "string", "enum": ["SNTP", "NONE"] },
+        "capture_ts_utc": {
+          "anyOf": [{ "$ref": "common.schema.json#/$defs/utcTimestamp" }, { "type": "null" }]
+        }
+      },
+      "if": { "properties": { "synced": { "const": true } } },
+      "then": {
+        "properties": {
+          "source": { "const": "SNTP" },
+          "capture_ts_utc": { "$ref": "common.schema.json#/$defs/utcTimestamp" }
+        }
+      },
+      "else": {
+        "properties": {
+          "source": { "const": "NONE" },
+          "capture_ts_utc": { "type": "null" }
+        }
+      }
+    },
+    "trigger": {
+      "description": "촬영/전송 사유.",
+      "type": "string",
+      "enum": ["PERIODIC", "EDGE_PERSON_DETECTED", "MANUAL"]
+    },
+    "image": {
+      "description": "'image' 파트에 대한 서술. Gateway 는 실제 파트와 byte_length/크기 일치를 검증한다.",
+      "type": "object",
+      "required": ["content_type", "width", "height", "byte_length"],
+      "additionalProperties": false,
+      "properties": {
+        "content_type": { "const": "image/jpeg" },
+        "width": { "type": "integer", "minimum": 1, "maximum": 4096 },
+        "height": { "type": "integer", "minimum": 1, "maximum": 4096 },
+        "byte_length": {
+          "description": "JPEG 바이트 수. 상한은 GATEWAY_MAX_IMAGE_BYTES 와 일치시킨다.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1048576
+        },
+        "jpeg_quality": {
+          "description": "esp32-camera 의 jpeg_quality 설정값(0~63, 낮을수록 고화질).",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 63
+        },
+        "frame_size": {
+          "description": "카메라 프레임 크기 프리셋 이름(예: VGA, SVGA).",
+          "type": "string",
+          "maxLength": 16
+        }
+      }
+    },
+    "edge_detection": {
+      "description": "선택 기능. ESP32-S3 의 Edge Impulse 사람 감지 결과. 비활성화 시 enabled=false, 나머지 null.",
+      "type": "object",
+      "required": ["enabled", "person_detected", "person_score", "model_id"],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "person_detected": { "type": ["boolean", "null"] },
+        "person_score": {
+          "anyOf": [{ "$ref": "common.schema.json#/$defs/confidence" }, { "type": "null" }]
+        },
+        "model_id": { "type": ["string", "null"], "maxLength": 64 },
+        "latency_ms": {
+          "description": "MCU 에서 측정한 감지 소요 시간. 측정하지 않으면 생략 또는 null.",
+          "type": ["number", "null"],
+          "minimum": 0
+        }
+      }
+    },
+    "firmware_version": { "type": "string", "minLength": 1, "maxLength": 32 }
+  }
+}

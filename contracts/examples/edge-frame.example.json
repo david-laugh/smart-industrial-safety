@@ -1,0 +1,34 @@
+{
+  "schema_version": "1.0.0",
+  "frame_id": "019a4a3c-7e2b-7c41-9d3e-2f6a1b8c0d11",
+  "device_id": "cam-line-a-01",
+  "boot_id": "5f3a9c21",
+  "frame_seq": 1024,
+  "mcu_uptime_ms": 3600123,
+  "capture_ts_utc": "2026-11-02T01:23:45.120Z",
+  "gateway_received_at_utc": "2026-11-02T01:23:45.180Z",
+  "gateway_clock_synced": true,
+  "image": {
+    "encoding": "jpeg",
+    "width": 640,
+    "height": 480,
+    "byte_length": 40960,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "location": {
+      "kind": "IN_MEMORY",
+      "path": null
+    }
+  },
+  "edge_detection": {
+    "enabled": true,
+    "person_detected": true,
+    "person_score": 0.8,
+    "model_id": "ei-person-fomo-placeholder",
+    "latency_ms": null
+  },
+  "selection": {
+    "reason": "EDGE_PERSON_HINT",
+    "queue_depth_at_enqueue": 0,
+    "dropped_since_last_selected": 0
+  }
+}

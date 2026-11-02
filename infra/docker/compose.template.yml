@@ -1,0 +1,72 @@
+# =============================================================================
+# TEMPLATE ONLY — 실행용 파일이 아니다.
+# - 기본 배포: 컨테이너 2개 (edge-core, cloud-sync)
+# - Dockerfile과 이미지는 아직 없다. image 값은 자리표시자다.
+# - 파일명이 compose.yaml이 아니므로 `docker compose up`이 자동으로 읽지 않는다.
+#   구현 단계에서 D가 Dockerfile 작성 후 compose.yaml로 확정한다.
+# - 메모리 값은 측정 전 초기 예산이다 (docs/memory-budget.md).
+#   Docker의 "m"은 MiB: 1900m = 1,992,294,400 B, 192m = 201,326,592 B
+# - 대상 플랫폼: Raspberry Pi 5 (linux/arm64)
+# =============================================================================
+
+name: ppe-safety
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  edge-core:
+    # gateway + frame selector + inference + ppe_decision
+    image: ${EDGE_CORE_IMAGE:?set EDGE_CORE_IMAGE}
+    platform: linux/arm64
+    restart: unless-stopped
+    env_file: .env
+    mem_limit: 1900m
+    memswap_limit: 1900m        # mem_limit과 같게 설정해 컨테이너 swap 사용 금지
+    # cpus: "4.0"               # 측정 후 결정 (ORT_INTRA_OP_THREADS와 함께 조정)
+    pids_limit: 256
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=64m           # tmpfs는 이 컨테이너 메모리 상한에 포함된다
+    ports:
+      - "${GATEWAY_BIND_ADDR:-0.0.0.0}:${GATEWAY_PORT:-8080}:8080"
+    volumes:
+      - ppe-data:/data          # spool, images (쓰기)
+      - ${MODEL_DIR:-./models}:/models:ro   # 모델 가중치는 저장소에 포함하지 않음
+    logging: *default-logging
+    # healthcheck: Gateway GET /healthz — 구현 단계에서 컨테이너 내부 명령과 함께 정의
+
+  cloud-sync:
+    # event_store + cloud_sync
+    image: ${CLOUD_SYNC_IMAGE:?set CLOUD_SYNC_IMAGE}
+    platform: linux/arm64
+    restart: unless-stopped
+    env_file: .env
+    mem_limit: 192m
+    memswap_limit: 192m
+    pids_limit: 64
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=16m
+    volumes:
+      - ppe-data:/data          # spool 수집, SQLite outbox, images 읽기/정리
+    # 외부 노출 포트 없음. Supabase로 나가는 HTTPS만 사용.
+    logging: *default-logging
+    # Supabase 고권한 키는 구현 단계에서 env_file 대신 Docker secret 사용을 검토
+    # secrets:
+    #   - supabase_service_key
+
+volumes:
+  ppe-data:
+    # 운영 시 SSD 경로 bind mount 권장 (SD카드 쓰기 최소화)
+
+# secrets:
+#   supabase_service_key:
+#     file: ./secrets/supabase_service_key   # 커밋 금지

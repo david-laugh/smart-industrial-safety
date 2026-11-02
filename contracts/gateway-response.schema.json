@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ppe-safety.local/contracts/gateway-response.schema.json",
+  "title": "Gateway frame upload response",
+  "description": "인터페이스 1 응답 (Gateway → ESP32-S3). HTTP 202(수락) 또는 4xx/5xx 응답 본문. 상태 코드 매핑은 docs/protocols.md 참조.",
+  "type": "object",
+  "required": ["schema_version", "accepted", "frame_id", "gateway_received_at_utc", "queue_depth", "retry_after_ms", "error"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "$ref": "common.schema.json#/$defs/schemaVersion" },
+    "accepted": { "type": "boolean" },
+    "frame_id": {
+      "description": "Gateway 가 부여한 프레임 ID. 거부 시 null.",
+      "anyOf": [{ "$ref": "common.schema.json#/$defs/uuid" }, { "type": "null" }]
+    },
+    "gateway_received_at_utc": { "$ref": "common.schema.json#/$defs/utcTimestamp" },
+    "queue_depth": {
+      "description": "응답 시점의 추론 대기 큐 길이.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "retry_after_ms": {
+      "description": "백프레셔 시 ESP32 가 다음 전송까지 기다릴 시간. 없으면 null.",
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "error": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["code", "message"],
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "type": "string",
+              "enum": [
+                "UNAUTHORIZED",
+                "INVALID_METADATA",
+                "UNSUPPORTED_MEDIA_TYPE",
+                "PAYLOAD_TOO_LARGE",
+                "IMAGE_METADATA_MISMATCH",
+                "QUEUE_FULL",
+                "RATE_LIMITED",
+                "INTERNAL_ERROR"
+              ]
+            },
+            "message": { "type": "string", "maxLength": 256 }
+          }
+        }
+      ]
+    }
+  },
+  "if": { "properties": { "accepted": { "const": true } } },
+  "then": {
+    "properties": {
+      "frame_id": { "$ref": "common.schema.json#/$defs/uuid" },
+      "error": { "type": "null" }
+    }
+  },
+  "else": {
+    "properties": {
+      "frame_id": { "type": "null" },
+      "error": { "type": "object" }
+    }
+  }
+}

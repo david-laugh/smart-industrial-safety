@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0.0",
+  "device_id": "cam-line-a-01",
+  "boot_id": "a1b2c3d4",
+  "frame_seq": 3,
+  "mcu_uptime_ms": 4210,
+  "time_sync": {
+    "synced": false,
+    "source": "NONE",
+    "capture_ts_utc": null
+  },
+  "trigger": "PERIODIC",
+  "image": {
+    "content_type": "image/jpeg",
+    "width": 640,
+    "height": 480,
+    "byte_length": 38912
+  },
+  "edge_detection": {
+    "enabled": false,
+    "person_detected": null,
+    "person_score": null,
+    "model_id": null
+  },
+  "firmware_version": "0.0.0-skeleton"
+}
