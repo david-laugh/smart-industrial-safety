@@ -42,3 +42,5 @@ Thumbs.db
 
 # 벤치마크 입력 프레임 (B 제공, 커밋하지 않음)
 bench_frames/
+
+firmware/esp32-s3/**/secrets.h
