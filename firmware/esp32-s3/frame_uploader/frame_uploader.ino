@@ -27,24 +27,39 @@
 #define NTP_SERVER "pool.ntp.org"
 #endif
 
-// 1 로 켜면 detectPerson() 이 true 일 때만 전송한다(trigger=EDGE_PERSON_DETECTED).
+// 1(기본)이면 Edge Impulse FOMO 로 사람이 감지된 프레임만 전송한다(trigger=EDGE_PERSON_DETECTED).
+// 0 이면 감지 없이 주기 전송(PERIODIC). 1 은 Person_detection_FOMO_inferencing 1.0.5 라이브러리가 필요하다.
 #ifndef USE_EDGE_DETECTION
-#define USE_EDGE_DETECTION 0
+#define USE_EDGE_DETECTION 1
 #endif
 #ifndef EDGE_MODEL_ID
-#define EDGE_MODEL_ID "stub-none"
+#define EDGE_MODEL_ID "ei-1154429-v5-fomo64"
+#endif
+// 이 점수 이상인 FOMO 검출이 하나라도 있으면 사람 있음. 모델 자체 임계값도 0.5.
+#ifndef EDGE_PERSON_THRESHOLD
+#define EDGE_PERSON_THRESHOLD 0.5f
+#endif
+// 촬영(=최대 전송) 주기. B 권장 500 ms(2 fps). Gateway 는 장치별 latest-wins 라 더 빠르면 드롭만 는다.
+#ifndef CAPTURE_INTERVAL_MS_CFG
+#define CAPTURE_INTERVAL_MS_CFG 500
+#endif
+
+#if USE_EDGE_DETECTION
+#include <Person_detection_FOMO_inferencing.h>
+#include "edge-impulse-sdk/dsp/image/image.hpp"
+#include "img_converters.h"
 #endif
 
 // ---------------------------------------------------------------- 설정 상수
 static const char* const SCHEMA_VERSION   = "1.0.0";
-static const char* const FIRMWARE_VERSION = "0.1.0";
+static const char* const FIRMWARE_VERSION = "0.2.0";
 
 static const framesize_t FRAME_SIZE      = FRAMESIZE_VGA;  // 640x480
 static const char* const FRAME_SIZE_NAME = "VGA";
 static const int JPEG_QUALITY            = 12;
 static const int FB_COUNT                = 2;
 
-static const uint32_t CAPTURE_INTERVAL_MS    = 500;
+static const uint32_t CAPTURE_INTERVAL_MS    = CAPTURE_INTERVAL_MS_CFG;
 static const uint32_t HTTP_CONNECT_TIMEOUT_MS = 3000;
 static const uint32_t HTTP_RESPONSE_TIMEOUT_MS = 5000;
 static const uint32_t DEFAULT_RETRY_AFTER_MS = 1000;   // 429 인데 retry_after_ms 가 없을 때
@@ -80,6 +95,7 @@ static volatile bool g_sntpSynced = false;
 static bool     g_wifiWasConnected = false;
 static uint32_t g_lastWifiAttempt = 0;
 static uint32_t g_statSent = 0, g_statAccepted = 0, g_statFailed = 0;
+static uint32_t g_statInferred = 0, g_statSkipped = 0;
 
 struct EdgeResult {
   bool  enabled;
@@ -95,14 +111,75 @@ struct SendResult {
   uint32_t elapsedMs;
 };
 
-// ---------------------------------------------------------------- 사람 감지 자리
-// Edge Impulse 등으로 교체할 자리. 지금은 항상 false(사람 없음).
-// score 는 0~1. 최종 PPE 판정은 Raspberry Pi 가 한다.
+// ---------------------------------------------------------------- 사람 감지 (Edge Impulse FOMO)
+// 전송할 바로 그 프레임 버퍼(JPEG)를 디코드해서 추론한다 → 추론 이미지와 전송 이미지의 시점이 같다.
+// FOMO 는 중심점 기반이라 박스 크기가 사람 크기가 아니다. 사람 유무와 최고 점수만 쓴다.
+// score 는 0~1. 최종 사람 박스·PPE 판정은 Raspberry Pi 가 한다.
+#if USE_EDGE_DETECTION
+static uint8_t* g_rgbFrame = nullptr;  // 디코드한 촬영 프레임 RGB888(BGR 순서), PSRAM, 부팅 시 1회 할당
+static uint8_t* g_rgbModel = nullptr;  // 모델 입력 크기로 줄인 RGB888, PSRAM
+static size_t   g_rgbFrameCap = 0;
+static uint32_t g_lastBoxes = 0;       // 직전 추론의 FOMO 검출 수(로그용)
+
+static bool allocEdgeBuffers(size_t width, size_t height) {
+  g_rgbFrameCap = width * height * 3;
+  g_rgbFrame = (uint8_t*)ps_malloc(g_rgbFrameCap);
+  g_rgbModel = (uint8_t*)ps_malloc(EI_CLASSIFIER_INPUT_WIDTH * EI_CLASSIFIER_INPUT_HEIGHT * 3);
+  return g_rgbFrame != nullptr && g_rgbModel != nullptr;
+}
+
+static int getModelData(size_t offset, size_t length, float* out) {
+  size_t px = offset * 3;
+  for (size_t i = 0; i < length; i++, px += 3) {
+    // fmt2rgb888 은 BGR 순서로 쓴다(esp32-camera #379) → 0xRRGGBB 로 묶는다(EI 예제와 같음)
+    out[i] = (float)((g_rgbModel[px + 2] << 16) | (g_rgbModel[px + 1] << 8) | g_rgbModel[px]);
+  }
+  return 0;
+}
+
+bool detectPerson(camera_fb_t* fb, float* score) {
+  *score = 0.0f;
+  g_lastBoxes = 0;
+  if (g_rgbFrame == nullptr || (size_t)fb->width * fb->height * 3 > g_rgbFrameCap) {
+    Serial.println("[edge] buffer not ready or frame larger than allocated");
+    return false;
+  }
+  if (!fmt2rgb888(fb->buf, fb->len, PIXFORMAT_JPEG, g_rgbFrame)) {
+    Serial.println("[edge] jpeg decode failed");
+    return false;
+  }
+  // 모델 학습 시 리사이즈 방식(EI_CLASSIFIER_RESIZE_MODE = fit-longest)과 같게 줄인다.
+  ei::image::processing::resize_image_using_mode(g_rgbFrame, fb->width, fb->height, g_rgbModel,
+                                                 EI_CLASSIFIER_INPUT_WIDTH, EI_CLASSIFIER_INPUT_HEIGHT, 3,
+                                                 EI_CLASSIFIER_RESIZE_MODE);
+
+  ei::signal_t signal;
+  signal.total_length = EI_CLASSIFIER_INPUT_WIDTH * EI_CLASSIFIER_INPUT_HEIGHT;
+  signal.get_data = &getModelData;
+  ei_impulse_result_t result = {};
+  EI_IMPULSE_ERROR err = run_classifier(&signal, &result, false);
+  if (err != EI_IMPULSE_OK) {
+    Serial.printf("[edge] run_classifier failed %d\n", err);
+    return false;
+  }
+
+  float best = 0.0f;
+  for (uint32_t i = 0; i < result.bounding_boxes_count; i++) {
+    const ei_impulse_result_bounding_box_t& bb = result.bounding_boxes[i];
+    if (bb.value <= 0.0f) continue;
+    g_lastBoxes++;
+    if (bb.value > best) best = bb.value;
+  }
+  *score = best;
+  return g_lastBoxes > 0 && best >= EDGE_PERSON_THRESHOLD;
+}
+#else
 bool detectPerson(camera_fb_t* fb, float* score) {
   (void)fb;
   if (score) *score = 0.0f;
   return false;
 }
+#endif
 
 // ---------------------------------------------------------------- 시간
 static void onTimeSync(struct timeval* tv) {
@@ -391,11 +468,16 @@ static void processFrame() {
     float score = 0.0f;
     bool person = detectPerson(fb, &score);
     edge = {true, person, score, (float)(esp_timer_get_time() - t0) / 1000.0f};
+    g_statInferred++;
     if (!person) {
-      Serial.printf("[frame] seq=%" PRIu32 " no person, skip\n", seq);
+      g_statSkipped++;
+      Serial.printf("[frame] seq=%" PRIu32 " no person (boxes=%" PRIu32 " score=%.2f infer=%.0fms), skip\n", seq,
+                    g_lastBoxes, score, edge.latencyMs);
       esp_camera_fb_return(fb);
       return;
     }
+    Serial.printf("[edge] seq=%" PRIu32 " person boxes=%" PRIu32 " score=%.2f infer=%.0fms\n", seq, g_lastBoxes,
+                  score, edge.latencyMs);
     trigger = "EDGE_PERSON_DETECTED";
   }
 #endif
@@ -462,10 +544,10 @@ static void processFrame() {
   }
 
   if (g_statSent % STATS_EVERY_FRAMES == 0) {
-    Serial.printf("[stats] sent=%" PRIu32 " accepted=%" PRIu32 " failed=%" PRIu32
-                  " heap=%u psram=%u uptime=%" PRIu64 "s\n",
-                  g_statSent, g_statAccepted, g_statFailed, (unsigned)ESP.getFreeHeap(),
-                  (unsigned)ESP.getFreePsram(), uptimeMs() / 1000);
+    Serial.printf("[stats] sent=%" PRIu32 " accepted=%" PRIu32 " failed=%" PRIu32 " inferred=%" PRIu32
+                  " skipped=%" PRIu32 " heap=%u psram=%u uptime=%" PRIu64 "s\n",
+                  g_statSent, g_statAccepted, g_statFailed, g_statInferred, g_statSkipped,
+                  (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getFreePsram(), uptimeMs() / 1000);
   }
 }
 
@@ -493,6 +575,15 @@ void setup() {
     delay(5000);
     ESP.restart();
   }
+#if USE_EDGE_DETECTION
+  if (!allocEdgeBuffers(640, 480)) {  // FRAME_SIZE(VGA) 기준
+    Serial.println("[boot] edge buffer alloc failed - restarting in 5 s");
+    delay(5000);
+    ESP.restart();
+  }
+  Serial.printf("[boot] edge model=%s input=%dx%d threshold=%.2f interval=%" PRIu32 "ms\n", EDGE_MODEL_ID,
+                EI_CLASSIFIER_INPUT_WIDTH, EI_CLASSIFIER_INPUT_HEIGHT, EDGE_PERSON_THRESHOLD, CAPTURE_INTERVAL_MS);
+#endif
   Serial.printf("[boot] camera ok heap=%u psram=%u\n", (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getFreePsram());
   g_nextCaptureAt = millis();
 }

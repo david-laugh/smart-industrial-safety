@@ -18,10 +18,10 @@ from datetime import datetime, timezone
 from typing import Optional
 
 SCHEMA_VERSION = "1.0.0"
-FIRMWARE_VERSION = "0.1.0"
+FIRMWARE_VERSION = "0.2.0"
 JPEG_QUALITY = 12
 FRAME_SIZE_NAME = "VGA"
-EDGE_MODEL_ID = "stub-none"
+EDGE_MODEL_ID = "ei-1154429-v5-fomo64"
 
 
 def format_capture_ts(epoch_ms: int) -> str:
