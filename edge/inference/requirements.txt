@@ -1,5 +1,5 @@
 # 런타임 의존성 (edge.inference + edge.ppe_decision). 하한만 지정, 고정은 Pi 5/Docker Python 버전 확정 후.
 # ppe_decision 은 표준 라이브러리만 사용한다.
 numpy>=1.24
-opencv-python-headless>=4.8
+opencv-python-headless>=4.8,<5
 onnxruntime>=1.17
