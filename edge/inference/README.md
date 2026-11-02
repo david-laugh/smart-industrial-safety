@@ -65,7 +65,7 @@ result = engine.infer(edge_frame, jpeg)
 | `INFERENCE_PERSON_MIN_CONFIDENCE` | 0.5 | |
 | `INFERENCE_PPE_WORN_MIN_CONFIDENCE` | 0.5 | 미설정 시 `INFERENCE_PPE_MIN_CONFIDENCE` |
 | `INFERENCE_PPE_MISSING_MIN_CONFIDENCE` | 0.5 | 미설정 시 `INFERENCE_PPE_MIN_CONFIDENCE` |
-| `INFERENCE_MIN_PERSON_BOX_RATIO` | 0.33 | 이미지 높이 대비 최소 사람 박스 높이 |
+| `INFERENCE_MIN_PERSON_BOX_RATIO` | 0.25 | 이미지 높이 대비 최소 사람 박스 높이 |
 | `INFERENCE_MIN_PERSON_BOX_PX` | (없음) | 설정하면 비율보다 우선 |
 | `INFERENCE_DET_MIN_CONFIDENCE` / `INFERENCE_NMS_IOU` / `INFERENCE_MAX_DET` | 0.25 / 0.7 / 300 | 검출 후처리 |
 | `INFERENCE_HELMET_REGION` / `INFERENCE_VEST_REGION` | `0.0,0.25` / `0.2,0.7` | 사람 박스 높이 대비 영역 |
@@ -75,7 +75,8 @@ result = engine.infer(edge_frame, jpeg)
 
 빈 문자열 값은 미설정으로 본다.
 
-> **최소 박스 기준(0.33)과 임계값(0.5)은 테스트 영상 1개 기준 값이며 실제 ESP32 프레임으로 재조정이 필요하다.**
+> **최소 박스 기준(0.25)과 임계값(0.5)은 테스트 영상 3개 기준 값이며 실제 ESP32 프레임으로 재조정이 필요하다.**
+> **카메라 해상도·화질을 바꾸면 재검증 필요**: 원본 1280x720 에서는 형광 티셔츠의 조끼 미착용 이벤트를 놓쳤다(640x480 q40 에서는 검출, [MODEL_CARD](MODEL_CARD.md) §5).
 
 ## 개발 PC 에서 실행
 
@@ -135,6 +136,13 @@ done
 - 프로세스 최대 RSS 교차 확인: `/usr/bin/time -v python edge/inference/tools/bench_pi.py ... 2>&1 | grep "Maximum resident"`.
 - spool 디스크 쓰기를 빼고 순수 처리만 보려면 `--no-publish`.
 - 결과는 장치 정보(OS, 커널, 쿨러, 전원, 저장장치)와 함께 `tests/performance/` 규칙(D 소관)에 따라 보고한다.
+
+## Pi 5 권장값
+
+| 항목 | 권장값 | 비고 |
+|---|---|---|
+| `ORT_INTRA_OP_THREADS` | `2` (팬 없음) / `3` (Active Cooler) | 팬 없이 3 이상이면 스로틀 위험 |
+| ESP32 전송 주기 | 500 ms (2 fps) | 펌웨어 설정. Gateway 큐는 장치별 latest-wins 라 더 빨라도 드롭만 늘어남 |
 
 ## 남은 이슈
 

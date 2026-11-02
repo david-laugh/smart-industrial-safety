@@ -16,6 +16,19 @@ from edge.inference.detector import LetterboxMeta, PPEDetector, letterbox, nms_p
 
 ROOT = Path(__file__).resolve().parents[3]
 MODEL = ROOT / "edge/inference/models/ppe_yolov8n_640.onnx"
+def _dev_frames_match(frames):
+    """dev 프레임이 B 원본(tests/dev_frames.sha256)과 같은지. 다르면 (False, 이유)."""
+    manifest = {}
+    for line in (ROOT / "edge/inference/tests/dev_frames.sha256").read_text(encoding="utf-8").splitlines():
+        if line.strip() and not line.startswith("#"):
+            digest, name = line.split(maxsplit=1)
+            manifest[name.strip()] = digest
+    for f in frames:
+        if manifest.get(f.name) != hashlib.sha256(f.read_bytes()).hexdigest():
+            return False, f"dev frame {f.name} differs from B's original (dev_frames.sha256)"
+    return True, ""
+
+
 NAMES = {0: "Hardhat", 1: "Mask", 2: "NO-Hardhat", 3: "NO-Mask", 4: "NO-Safety Vest", 5: "Person",
          6: "Safety Cone", 7: "Safety Vest", 8: "machinery", 9: "vehicle"}
 
@@ -149,6 +162,9 @@ def test_infer_on_real_frame_if_available(engine):
     frames = sorted((ROOT / "edge/inference/_dev/frames/esp32").glob("*.jpg"))
     if not frames:
         pytest.skip("dev frames not extracted")
+    ok, why = _dev_frames_match(frames[:1])
+    if not ok:
+        pytest.skip(why)
     jpeg = frames[0].read_bytes()
     ef, _ = _frame()
     ef["image"].update({"byte_length": len(jpeg), "sha256": hashlib.sha256(jpeg).hexdigest()})

@@ -33,16 +33,20 @@ events = decision.update(edge_frame, inference_result, jpeg)
 
 상세: [docs/protocols.md §4, §시간 규칙](../../docs/protocols.md)
 
-## 판정 정책 (policy `0.0.0`)
+## 판정 정책 (policy `0.1.0`)
 
 1. **같은 사람**: 추적기 없음. bbox 중심을 `PPE_DEDUP_GRID`(가로x세로, 기본 4x4)로 양자화한 셀 `pos:r{행}c{열}`.
    격자 경계 떨림을 막기 위해, 해당 장치에서 추적 중인 셀의 마지막 중심과 `PPE_CELL_STICKY_DIST`(격자 단위, 기본 0.5) 이내면 그 셀을 재사용.
+   helmet·vest 가 모두 UNKNOWN 인 사람(원경·저신뢰)은 셀 배정·창·sticky 중심에서 제외(같은 셀 평균 중심이 끌려 위반자가 새 셀로 분리되는 것 방지).
+   단 `PPE_UNKNOWN_IS_VIOLATION=true` 면 포함.
 2. **평활화**: (장치, 셀)별 최근 `PPE_DECISION_WINDOW_FRAMES`(5) 프레임. 사람이 없는 프레임은 ABSENT(미착용으로 세지 않음).
    항목별 MISSING 수 ≥ `PPE_DECISION_MIN_MISSING_FRAMES`(3) **이고 현재 프레임도 MISSING** 이면 확정(증거 이미지에 위반이 보이도록).
    UNKNOWN 은 `PPE_UNKNOWN_IS_VIOLATION=true` 일 때만 MISSING 으로 센다. 같은 셀에 여러 명이면 MISSING > WORN > UNKNOWN.
 3. **이벤트 단위**: 위반자 1명 = 이벤트 1건(자기 `event_id`, `dedup_key`, `violations` 1개, event_id 별 증거 JPEG).
-4. **dedup**: `dedup_key = {device_id}|pos:r{r}c{c}|{정렬된 유형 ,연결}|{floor(t/W)*W}` (t = occurred_at epoch 초, W = `PPE_DEDUP_WINDOW_S`).
-   같은 (장치, 셀, 유형)은 마지막 발행 후 W초 동안 재발행하지 않음(버킷 경계를 넘어도 억제). 유형 조합이 바뀌면 새 이벤트.
+4. **dedup**: 억제 상태는 (장치, 셀, **위반 유형**) 단위. 같은 유형은 마지막 발행 후 W초(`PPE_DEDUP_WINDOW_S`) 동안 재발행하지 않음(버킷 경계를 넘어도 억제).
+   이벤트에는 이번에 새로 확정됐고 억제되지 않은 유형만 넣고, 동시에 확정된 유형은 한 이벤트로 묶는다. 새 유형이 없으면 이벤트 없음
+   (예: HELMET 발행 후 VEST 가 나중에 확정 → `VEST_MISSING` 만 담은 이벤트 1건 추가).
+   `dedup_key = {device_id}|pos:r{r}c{c}|{이벤트에 들어간 유형 정렬 ,연결}|{floor(t/W)*W}` (t = occurred_at epoch 초).
 5. **결정적 동작**: 같은 입력 시퀀스 → 같은 판정. `event_id`(`id_fn`)와 `decided_at_utc`(`now_fn`)는 주입 가능.
 6. **시간**: `capture_ts_utc` 가 있고 `|capture − gateway_received| ≤ TIME_MAX_DEVICE_SKEW_MS` → `DEVICE_SNTP`, 아니면 `GATEWAY_RECEIVED`.
 7. **spool**: `spool/tmp/*.part` 에 쓰기+fsync → rename. JPEG 먼저, JSON 나중. 게시 실패 시 해당 이벤트는 dedup 에 기록하지 않아 다음 프레임에서 재발행.
@@ -53,7 +57,7 @@ events = decision.update(edge_frame, inference_result, jpeg)
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
-| `PPE_POLICY_VERSION` | `0.0.0` | |
+| `PPE_POLICY_VERSION` | `0.1.0` | |
 | `PPE_DECISION_WINDOW_FRAMES` | 5 | |
 | `PPE_DECISION_MIN_MISSING_FRAMES` | 3 | 1 ≤ 값 ≤ WINDOW |
 | `PPE_UNKNOWN_IS_VIOLATION` | false | |
@@ -86,6 +90,6 @@ events = decision.update(edge_frame, inference_result, jpeg)
 ## 남은 이슈
 
 - **추적기 부재**: 사람이 격자 셀을 크게 이동하면 평활화 창이 끊기고 새 셀에서 다시 시작(그동안 확정 지연, 30초 안 재발행 가능).
-- **박스 기준·임계값 재조정 필요**: 추론 측 최소 박스(0.33)·임계값(0.5)은 테스트 영상 1개 기준.
+- **박스 기준·임계값 재조정 필요**: 추론 측 최소 박스(0.25)·임계값(0.5)은 테스트 영상 2개 기준.
 - **ESP32 persons 필드**: 스키마 1.1.0 대기.
 - 같은 프레임의 여러 이벤트는 같은 JPEG 내용을 event_id 별 파일로 중복 저장(디스크 사용량 증가, 계약상 의도된 동작).

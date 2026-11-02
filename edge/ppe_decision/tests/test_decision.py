@@ -93,7 +93,7 @@ def test_confirmed_after_min_missing_frames():
     v = evs[2]["violations"][0]
     assert v["violation_types"] == ["HELMET_MISSING"]
     assert evs[2]["decision"]["frames_considered"] == 3
-    assert evs[2]["decision"]["policy_version"] == "0.0.0"
+    assert evs[2]["decision"]["policy_version"] == "0.1.0"
 
 
 def test_not_enough_missing_frames_no_event():
@@ -192,10 +192,40 @@ def test_dedup_suppresses_across_bucket_boundary():
     assert n == 1
 
 
+def _types_and_keys(evs):
+    return [(i, e["violations"][0]["violation_types"], e["decision"]["dedup_key"].split("|")[2])
+            for i, e in enumerate(evs) if e is not None]
+
+
 def test_different_violation_types_are_separate_keys():
+    """억제는 유형 단위: HELMET 발행 후 VEST 가 확정되면 VEST 만 담은 이벤트가 추가된다."""
     seq = [[person(0, "MISSING", "WORN")]] * 3 + [[person(0, "MISSING", "MISSING")]] * 3
     evs = run(decider(), seq)
-    assert [i for i, e in enumerate(evs) if e is not None] == [2, 5]
+    assert _types_and_keys(evs) == [(2, ["HELMET_MISSING"], "HELMET_MISSING"),
+                                    (5, ["VEST_MISSING"], "VEST_MISSING")]
+
+
+def test_helmet_first_then_vest_later():
+    seq = ([[person(0, "MISSING", "WORN")]] * 6 + [[person(0, "MISSING", "MISSING")]] * 10)
+    evs = run(decider(), seq)
+    got = _types_and_keys(evs)
+    assert got == [(2, ["HELMET_MISSING"], "HELMET_MISSING"), (8, ["VEST_MISSING"], "VEST_MISSING")]
+    vest_ev = evs[8]["violations"][0]
+    assert vest_ev["helmet"]["status"] == "MISSING" and vest_ev["vest"]["status"] == "MISSING"
+
+
+def test_both_confirmed_together_one_event():
+    evs = run(decider(), [[person(0, "MISSING", "MISSING")]] * 20)
+    got = _types_and_keys(evs)
+    assert got == [(2, ["HELMET_MISSING", "VEST_MISSING"], "HELMET_MISSING,VEST_MISSING")]
+
+
+def test_helmet_repeated_suppressed_then_reissued_after_window():
+    # 2fps 70프레임(35초) 연속 HELMET 미착용, 중간에 VEST 가 잠깐 확정돼도 HELMET 은 다시 나오지 않음
+    seq = [[person(0, "MISSING", "WORN")]] * 20 + [[person(0, "MISSING", "MISSING")]] * 5 +           [[person(0, "MISSING", "WORN")]] * 45
+    evs = run(decider(), seq)
+    got = [(i, t) for i, t, _ in _types_and_keys(evs)]
+    assert got == [(2, ["HELMET_MISSING"]), (22, ["VEST_MISSING"]), (62, ["HELMET_MISSING"])]
 
 
 def test_sticky_cell_across_grid_boundary():
@@ -204,6 +234,24 @@ def test_sticky_cell_across_grid_boundary():
     right = person(0, "MISSING", "WORN", bbox=(0.39, 0.1, 0.62, 0.95))  # 중심 0.505 → c2
     evs = run(decider(), [[left], [right], [left], [right], [left], [right]] * 5)
     assert sum(e is not None for e in evs) == 1
+    assert evs[2] is not None
+
+
+def test_unknown_person_in_same_cell_does_not_split_violator():
+    """걸어오는 작업자 영상 회귀: 뒤쪽 원경 인물(UNKNOWN)이 같은 셀에 있어도 위반자는 이벤트 1건."""
+    seq = []
+    for k in range(40):
+        y0 = 0.11 + k * 0.012                       # 주 작업자: 아래로 이동하며 커짐
+        main = person(0, "MISSING", "WORN", bbox=(0.45, y0, 0.57, min(1.0, y0 + 0.25 + k * 0.01)))
+        back = person(1, "UNKNOWN", "UNKNOWN", bbox=(0.51, 0.04, 0.55, 0.13))
+        dup = [person(2, "UNKNOWN", "UNKNOWN", bbox=(0.51, 0.05, 0.53, 0.09))] if k % 7 == 3 else []
+        seq.append([main, back] + dup)
+    evs = run_all(decider(), seq)
+    assert sum(len(x) for x in evs) == 1
+
+
+def test_unknown_persons_tracked_when_unknown_is_violation():
+    evs = run(decider(unknown_is_violation=True), [[person(0, "UNKNOWN", "UNKNOWN")]] * 3)
     assert evs[2] is not None
 
 

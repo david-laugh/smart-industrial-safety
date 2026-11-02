@@ -39,3 +39,6 @@ dist/
 Thumbs.db
 .idea/
 .vscode/
+
+# 벤치마크 입력 프레임 (B 제공, 커밋하지 않음)
+bench_frames/

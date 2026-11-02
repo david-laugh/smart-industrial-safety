@@ -4,6 +4,8 @@
 - 같은 사람 식별(추적기 없음): bbox 중심을 PPE_DEDUP_GRID 격자로 양자화한 셀 "pos:r{행}c{열}".
   격자 경계 떨림 방지(sticky): 해당 장치에서 이미 추적 중인 셀의 마지막 중심과 거리(격자 단위)가
   PPE_CELL_STICKY_DIST(기본 0.5) 이하이면 가장 가까운 기존 셀을 그대로 쓴다.
+  helmet·vest 가 모두 UNKNOWN 인 사람은 셀 배정·창·sticky 중심 계산에서 제외한다(B-lite).
+  (PPE_UNKNOWN_IS_VIOLATION=true 면 포함)
 - 평활화: (device_id, 셀)마다 해당 장치의 최근 PPE_DECISION_WINDOW_FRAMES 프레임 상태를 보관.
   그 프레임에 셀에 사람이 없으면 ABSENT 로 기록(미착용으로 세지 않음).
   항목(helmet/vest)별로 창 안 MISSING 수 ≥ PPE_DECISION_MIN_MISSING_FRAMES 이고
@@ -11,10 +13,12 @@
   UNKNOWN 은 PPE_UNKNOWN_IS_VIOLATION=true 일 때만 MISSING 으로 센다.
   같은 셀에 여러 사람이 있으면 항목별 우선순위 MISSING > WORN > UNKNOWN 으로 셀 상태를 정한다.
 - 위반 유형: HELMET_MISSING, VEST_MISSING (정렬).
-- dedup_key = "{device_id}|pos:r{r}c{c}|{정렬 위반유형 ,연결}|{window_start_epoch_s}"
+- dedup: 억제 상태는 (device_id, 셀, 위반 유형) 단위. 같은 유형은 마지막 발행 후 PPE_DEDUP_WINDOW_S 초 동안
+  재발행하지 않는다(버킷 경계를 넘어도 창 안이면 억제, 같은 버킷도 억제).
+  이벤트에는 이번에 새로 확정됐고 아직 억제되지 않은 유형만 넣고, 동시에 확정된 유형은 한 이벤트로 묶는다.
+  새 유형이 없으면 이벤트를 내지 않는다(예: HELMET 발행 후 VEST 가 나중에 확정 → VEST_MISSING 이벤트 1건 추가).
+  dedup_key = "{device_id}|pos:r{r}c{c}|{이벤트에 들어간 유형 정렬 ,연결}|{window_start_epoch_s}"
   window_start_epoch_s = floor(occurred_epoch_s / PPE_DEDUP_WINDOW_S) * PPE_DEDUP_WINDOW_S
-  억제: 같은 (device_id, 셀, 위반유형) 이 마지막 발행 후 PPE_DEDUP_WINDOW_S 초 안이면 재발행하지 않음
-  (버킷 경계를 넘어도 창 안이면 억제). 같은 키도 재발행하지 않음.
 - 위반자마다 별도 이벤트(자기 event_id, 자기 dedup_key, violations 1개, event_id 별 증거 JPEG).
   dedup_key 형식이 pos 하나를 포함하므로 계약 의도와 일치한다.
 - 결정적 동작: 같은 입력 시퀀스 → 같은 판정. event_id, decided_at 만 다르며 둘 다 주입 가능.
@@ -107,8 +111,8 @@ class PPEDecision:
         self._windows: Dict[Tuple[str, Cell], Deque[Tuple[str, str]]] = {}
         # (device_id, cell) → 마지막 중심(격자 단위 x, y)
         self._centers: Dict[Tuple[str, Cell], Tuple[float, float]] = {}
-        # (device_id, cell, types) → (last_emit_epoch_s, last_key)
-        self._emitted: Dict[Tuple[str, Cell, str], Tuple[float, str]] = {}
+        # (device_id, cell, violation_type) → (last_emit_epoch_s, window_start_epoch_s)
+        self._emitted: Dict[Tuple[str, Cell, str], Tuple[float, int]] = {}
 
     # ------------------------------------------------------------------
     def _grid_center(self, bbox: Dict[str, float]) -> Tuple[float, float]:
@@ -136,11 +140,22 @@ class PPEDecision:
     def _counts_as_missing(self, status: str) -> bool:
         return status == MISSING or (self.cfg.unknown_is_violation and status == UNKNOWN)
 
+    def _trackable(self, p: Dict[str, Any]) -> bool:
+        """평활화 대상인지: 둘 다 UNKNOWN 이면 제외(단 UNKNOWN 을 위반으로 세는 정책이면 포함)."""
+        if self.cfg.unknown_is_violation:
+            return True
+        return p["helmet"]["status"] != UNKNOWN or p["vest"]["status"] != UNKNOWN
+
     def _update_windows(self, device_id: str, persons: List[Dict[str, Any]]) -> Dict[int, Cell]:
         """사람별 셀 배정 후 창 갱신. 반환: {person_index: cell}"""
         by_cell: Dict[Cell, List[Dict[str, Any]]] = {}
         assigned: Dict[int, Cell] = {}
         for p in sorted(persons, key=lambda q: q["person_index"]):
+            if not self._trackable(p):
+                # B-lite: 판정 불가 사람(둘 다 UNKNOWN)은 셀 배정·창·sticky 중심에서 제외.
+                # (원경 인물/저신뢰 중복 박스가 같은 셀의 평균 중심을 끌어 실제 위반자를 새 셀로 떼어내는 것 방지)
+                assigned[p["person_index"]] = self.cell_of(p["bbox"])
+                continue
             cell = self.assign_cell(device_id, p["bbox"])
             assigned[p["person_index"]] = cell
             by_cell.setdefault(cell, []).append(p)
@@ -210,16 +225,22 @@ class PPEDecision:
             types = self._confirmed(device_id, cell, p)
             if not types:
                 continue
-            tkey = ",".join(types)
-            dkey = f"{device_id}|pos:r{cell[0]}c{cell[1]}|{tkey}|{window_start}"
-            sup_key = (device_id, cell, tkey)
-            last = self._emitted.get(sup_key)
-            if last is not None and (last[1] == dkey or 0 <= occ_s - last[0] < w):
+            # 억제는 (장치, 셀, 위반 유형) 단위. 이번에 확정됐고 아직 억제되지 않은 유형만 이벤트에 넣는다.
+            new_types = []
+            for vt in types:
+                sup_key = (device_id, cell, vt)
+                last = self._emitted.get(sup_key)
+                if last is not None and (last[1] == window_start or 0 <= occ_s - last[0] < w):
+                    continue
+                if sup_key in seen:  # 같은 프레임·같은 셀의 중복 사람
+                    continue
+                new_types.append(vt)
+            if not new_types:
                 continue
-            if sup_key in seen:  # 같은 프레임·같은 셀의 중복 사람
-                continue
-            seen.add(sup_key)
-            candidates.append((p, types, sup_key, dkey, len(self._windows[(device_id, cell)])))
+            sup_keys = [(device_id, cell, vt) for vt in new_types]
+            seen.update(sup_keys)
+            dkey = f"{device_id}|pos:r{cell[0]}c{cell[1]}|{','.join(new_types)}|{window_start}"
+            candidates.append((p, new_types, sup_keys, dkey, len(self._windows[(device_id, cell)])))
 
         events: List[Dict[str, Any]] = []
         if not candidates:
@@ -229,7 +250,7 @@ class PPEDecision:
         if img_size is None:
             img_size = (inference_result["image_size"]["width"], inference_result["image_size"]["height"])
         jpeg_sha = hashlib.sha256(jpeg).hexdigest()
-        for p, types, sup_key, dkey, frames_considered in candidates:
+        for p, types, sup_keys, dkey, frames_considered in candidates:
             event_id = self.id_fn()
             event = {
                 "schema_version": self.cfg.schema_version,
@@ -275,6 +296,7 @@ class PPEDecision:
             if self.publisher is not None:
                 # 실패 시 예외 → 이 이벤트의 dedup 상태 미기록(다음 프레임에서 재발행). 앞서 게시된 이벤트는 유지.
                 self.publisher.publish(event, jpeg)
-            self._emitted[sup_key] = (occ_s, dkey)
+            for sk in sup_keys:
+                self._emitted[sk] = (occ_s, window_start)
             events.append(event)
         return events
