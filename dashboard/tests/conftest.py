@@ -18,10 +18,8 @@ sys.path.insert(0, str(DASHBOARD_DIR))
 from server.main import Settings, create_app  # noqa: E402
 
 
-@pytest.fixture(scope="session")
-def base_url():
-    """샘플 모드 FastAPI 앱을 임의 포트의 uvicorn으로 띄운다(로컬 .env 영향 없음)."""
-    config = uvicorn.Config(create_app(Settings()), host="127.0.0.1", port=0, log_level="warning")
+def _serve(app):
+    config = uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning")
     server = uvicorn.Server(config)
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
@@ -31,7 +29,26 @@ def base_url():
             raise RuntimeError("uvicorn 이 시작되지 않았습니다")
         time.sleep(0.05)
     port = server.servers[0].sockets[0].getsockname()[1]
-    yield f"http://127.0.0.1:{port}/"
+    return server, thread, f"http://127.0.0.1:{port}/"
+
+
+@pytest.fixture(scope="session")
+def base_url():
+    """샘플 데이터 FastAPI 앱을 임의 포트의 uvicorn으로 띄운다(로컬 .env 영향 없음)."""
+    server, thread, url = _serve(create_app(Settings()))
+    yield url
+    server.should_exit = True
+    thread.join(timeout=5)
+
+
+@pytest.fixture(scope="session")
+def supabase_base_url():
+    """DASHBOARD_DATA_SOURCE=supabase 로 띄운 앱. Supabase 는 tests/fake_supabase.py 대역으로 응답."""
+    from tests.fake_supabase import ANON_KEY, FAKE_URL
+
+    s = Settings(data_source="supabase", supabase_url=FAKE_URL, supabase_anon_key=ANON_KEY)
+    server, thread, url = _serve(create_app(s))
+    yield url
     server.should_exit = True
     thread.join(timeout=5)
 

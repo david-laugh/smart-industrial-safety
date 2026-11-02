@@ -1,6 +1,6 @@
 # dashboard/ — 이벤트 확인 웹 대시보드
 
-담당: **C (Edge / Cloud)** · 상태: 1차 구현(샘플 데이터로 동작·테스트, Supabase 연결은 미검증)
+담당: **C (Edge / Cloud)** · 상태: 1차 구현. Supabase 요청 형식은 대역(fake)으로 검증, 실제 dev 프로젝트 연결은 미검증
 
 ## 빠른 시작
 
@@ -11,11 +11,11 @@ python -m venv .venv
 .venv/Scripts/python -m server
 ```
 
-브라우저에서 http://127.0.0.1:8765/ 를 열면 로그인 없이 바로 이벤트를 볼 수 있다. 기본 데이터 소스는 브라우저에서 생성하는 **샘플 데이터**다.
+브라우저에서 http://127.0.0.1:8765/ 를 열면 로그인 없이 바로 이벤트를 볼 수 있다. `.env`가 없으면 브라우저에서 생성하는 **샘플 데이터**로, `DASHBOARD_DATA_SOURCE=supabase`면 **실제 Supabase**와 통신한다([Supabase 연결](#supabase-연결)).
 
 ## 범위
 
-- 로그인 화면 없음(바로 조회). 접근 통제는 Supabase RLS가 담당 — 아래 [접근 통제](#접근-통제-sys-sec-01) 참고
+- 로그인 화면 없음(바로 조회). 비인증 접근 차단(SYS-SEC-01)은 요청 토큰(apikey/Bearer)과 RLS로 판단
 - 이벤트 목록: 기간, 장치, 위반 유형 필터, `occurred_at` 내림차순
 - 이벤트 상세: 증거 이미지(Signed URL), bbox 오버레이, 사람별 helmet/vest 상태와 신뢰도, 시간 정보(`occurred_at_source` 표시)
 - 읽기 전용 (이벤트 수정/삭제 기능 없음)
@@ -42,7 +42,8 @@ python -m venv .venv
 | 데이터 접근 | `js/data-source.js` 어댑터(`sample` / `supabase`) | UI는 어댑터 인터페이스만 사용 → Supabase 준비 전에도 UI 개발 가능. 서버는 데이터 API를 갖지 않고 브라우저가 anon key로 직접 조회 |
 | 실시간 갱신 | 선택(상단 "실시간" 토글). Supabase에서는 Realtime `INSERT` 구독 | 기본은 꺼짐. 새 이벤트는 바로 끼워 넣지 않고 "새 이벤트 N건 보기"로 알림 |
 | 딥링크 | `#event=<event_id>` | 특정 이벤트 링크 공유 |
-| 로그인 | 없음(바로 조회) | 요청에 따라 제거. 실제 데이터 연결 시 [접근 통제](#접근-통제-sys-sec-01) 결정 필요 |
+| 로그인 | 없음(바로 조회) | 접근 판단은 로그인이 아니라 토큰(anon key) + RLS |
+| 가데이터 | `seed/`(Python)가 생성해 cloud-sync 와 같은 규칙으로 업로드 | 대시보드가 실제 Supabase 통신으로 동작하는지 확인(I-5) |
 | 호스팅 | 미정 | Supabase 프로젝트 확정 후 결정 |
 
 ## 구조
@@ -60,13 +61,20 @@ dashboard/
 ├── server/
 │   ├── main.py                 FastAPI 앱(정적 서빙, 설정 주입, 보안 헤더)
 │   └── __main__.py             `python -m server` 진입점(uvicorn)
-├── .env.example                서버 환경변수 템플릿 → .env 로 복사(커밋 금지)
+├── seed/
+│   ├── schema.sql              dev 프로젝트용 테이블·버킷·RLS·Realtime
+│   ├── generate.py             계약 형태 가데이터 + 실제 JPEG 생성
+│   └── __main__.py             `python -m seed` 업로더(Storage → ppe_events)
+├── .env.example                서버/seed 환경변수 템플릿 → .env 로 복사(커밋 금지)
 ├── requirements.txt            실행 의존성(fastapi, uvicorn, python-dotenv)
-├── requirements-dev.txt        테스트 의존성(+ jsonschema, pytest, httpx, playwright)
+├── requirements-dev.txt        테스트·seed 의존성(+ jsonschema, pytest, httpx, pillow, playwright)
 └── tests/
     ├── conftest.py             uvicorn 서버·헤드리스 Chromium·계약 스키마 fixture
+    ├── fake_supabase.py        PostgREST/Storage 대역(요청 형식 검증용)
     ├── test_server.py          서빙 범위·설정 주입·키 검증·보안 헤더
     ├── test_sample_contract.py 샘플 데이터 ↔ contracts/ JSON Schema 검증(CON-01~03)
+    ├── test_seed.py            가데이터 계약·JPEG·시간/ID/dedup 규칙·업로드 순서/헤더/재시도
+    ├── test_supabase_mode.py   supabase 모드 실제 요청(필터·count·토큰·Signed URL)
     └── test_dashboard_e2e.py   첫 화면·필터·페이지·상세·딥링크·실시간·모바일 E2E
 ```
 
@@ -84,7 +92,7 @@ Windows PowerShell에서는 `.venv\Scripts\python.exe`, macOS/Linux에서는 `.v
 
 ### 2. 설정 (선택)
 
-샘플 모드는 설정 없이 동작한다. 바꿀 값이 있으면:
+`.env` 없이 실행하면 샘플 데이터로 동작한다. Supabase 에 연결하려면:
 
 ```bash
 cp .env.example .env
@@ -137,25 +145,67 @@ PowerShell에서는 `VAR=값 명령` 대신 `$env:DASHBOARD_RELOAD="true"; .venv
 - 4개 장치, 최근 30일 180건이 seed로 결정적으로 생성된다(정시 단위로 고정되어 새로고침해도 `event_id` 유지).
 - 샘플 데이터는 `supabase-event-record` / `ppe-event` 스키마를 통과한다(테스트로 보장).
 
-## Supabase 연결 (준비되면)
+## Supabase 연결
 
-1. `.env`에 `DASHBOARD_DATA_SOURCE=supabase`, `SUPABASE_URL`, `SUPABASE_ANON_KEY` 입력 후 서버 재시작
-2. 전제: `ppe_events` select·Storage Signed URL 발급 허용(RLS, [cloud/README.md](../cloud/README.md) §3), Realtime을 쓰려면 `ppe_events`를 publication에 추가
-3. 어댑터가 사용하는 쿼리: `occurred_at` 범위(gte/lt), `device_id in`, `violation_types` overlaps, `occurred_at desc` + range 페이지네이션, `count=exact`
+### 1. dev 프로젝트 준비 (최초 1회)
 
-### 접근 통제 (SYS-SEC-01)
+Supabase **dev** 프로젝트(운영과 분리, [docs/integration-plan.md](../docs/integration-plan.md) §6)의 SQL Editor에서 [`seed/schema.sql`](seed/schema.sql)을 실행한다. 여러 번 실행해도 안전하다.
 
-[docs/architecture.md](../docs/architecture.md)는 대시보드를 "인증 사용자만"으로, [docs/acceptance-criteria.md](../docs/acceptance-criteria.md) **SYS-SEC-01**은 "비인증 사용자의 이벤트/이미지 접근 불가"로 정한다.
-대시보드는 로그인 화면 없이 anon 키로 조회하므로, 통제는 Supabase RLS에 맡긴다.
+- `public.ppe_events` 테이블·인덱스([cloud/README.md](../cloud/README.md) §1과 동일)
+- 비공개 버킷 `ppe-evidence`(1 MiB, `image/jpeg`만)
+- RLS: `anon`/`authenticated` 토큰은 **select만**(행 조회, Signed URL 발급). 쓰기 정책 없음 → 업로드는 service_role만
+- Realtime publication에 `ppe_events` 추가(실시간 토글용)
 
-- cloud/ 설계(anon 접근 불가)를 그대로 두면 SYS-SEC-01은 지켜지지만 대시보드에는 데이터가 보이지 않는다.
-- 실제 데이터를 연결할 때는 다음 중 하나를 결정해야 한다(미정, 결정 후 `cloud/`·`docs/` 갱신):
-  1. 대시보드에 Supabase Auth 로그인을 다시 추가(authenticated RLS 유지, 문서와 일치)
-  2. 대시보드를 사내망/VPN·리버스 프록시 인증 뒤에만 두고 anon select 허용(SYS-SEC-01 해석 변경 필요 → D와 협의)
+### 2. 가데이터 업로드
+
+```bash
+cd dashboard
+.venv/Scripts/python -m pip install -r requirements-dev.txt
+# .env: SUPABASE_URL, SUPABASE_SERVICE_KEY_FILE(서비스 키를 담은 파일 경로)
+.venv/Scripts/python -m seed --count 60 --days 7          # 최근 7일에 60건
+.venv/Scripts/python -m seed --count 10 --out seed-out    # 업로드 없이 JSON/JPEG 로만 생성
+```
+
+- cloud-sync 와 같은 규칙으로 올린다: `occurred_at` 오래된 순, 이벤트마다 **Storage 먼저 → 행 나중**.
+- 업로드 전에 모든 행을 `contracts/supabase-event-record` 로 검증(CON-01). 하나라도 실패하면 아무것도 올리지 않는다.
+- 같은 `--seed` 로 다시 실행해도 중복이 생기지 않는다(Storage 409 + 해시 일치는 성공, 행은 `event_id` 중복 무시). 단 시각이 실행 시점 기준이라 다른 시각에 실행하면 새 이벤트가 된다.
+- service_role 키는 seed 전용이다. 대시보드 서버는 `SUPABASE_ANON_KEY` 만 읽어 브라우저로 내려보낸다.
+- 지우려면 dev 프로젝트에서 `truncate public.ppe_events;` 와 Storage `ppe-evidence` 비우기.
+
+### 3. 대시보드 연결
+
+`.env` 에 다음을 넣고 서버를 재시작한다.
+
+```
+DASHBOARD_DATA_SOURCE=supabase
+SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_ANON_KEY=<anon 또는 sb_publishable_ 키>
+```
+
+### 주고받는 데이터 규칙
+
+기준 문서: [contracts/supabase-event-record.schema.json](../contracts/supabase-event-record.schema.json)(스키마가 문서보다 우선), [docs/protocols.md](../docs/protocols.md) §5·시간 규칙·ID 규칙·중복 방지, [cloud/README.md](../cloud/README.md).
+
+| 구분 | 규칙 |
+|---|---|
+| 행 | `supabase-event-record` 15개 필드 전부 필수, 추가 필드 금지. `ingested_at` 은 DB가 생성(보내지 않음) |
+| 원본 | `event_payload` = `ppe-event` 전체(jsonb). `violation_count`=`violations` 길이, `violation_types`=사람별 유형 합집합 |
+| 시각 | RFC 3339 UTC, `Z` 필수(`+09:00` 금지). 표시할 때만 현지 시간대로 변환 |
+| `occurred_at` | `capture_ts_utc` 가 있고 `gateway_received_at` 과 차이 ≤ `TIME_MAX_DEVICE_SKEW_MS`(2000) → `DEVICE_SNTP`, 아니면 수신 시각 + `GATEWAY_RECEIVED` |
+| ID | `event_id`·`frame_id` UUIDv7 소문자. `event_id` 는 영구 불변(재시도·재업로드에도 동일, PK) |
+| PPE 상태 | `WORN`/`MISSING`/`UNKNOWN`. UNKNOWN 만 있는 사람은 위반 아님. 위반 유형 `HELMET_MISSING`/`VEST_MISSING` |
+| bbox | 원본 이미지 기준 0~1 정규화, 좌상단 원점 |
+| `dedup_key` | `{device_id}\|{track_id 또는 pos:r{행}c{열}}\|{정렬된 유형을 ,로}\|{window_start_epoch_s}` |
+| 이미지 | 비공개 버킷 `ppe-evidence`, 경로 `{device_id}/{yyyy}/{mm}/{dd}/{event_id}.jpg`(occurred_at UTC 날짜), `image/jpeg`, ≤ 1 MiB, `image_sha256` = 실제 바이트 SHA-256. JSON에 Base64 금지 |
+| 업로드 | Storage `POST /storage/v1/object/ppe-evidence/{path}` + `x-upsert: false` → `POST /rest/v1/ppe_events?on_conflict=event_id` + `Prefer: resolution=ignore-duplicates,return=minimal` |
+| 재시도 | 408/429/5xx·네트워크 → 백오프(`Retry-After` 우선), 400/422 → 재시도 안 함, 401/403 → 즉시 중단 |
+| 대시보드 조회 | 토큰(anon key)으로 `select`: `occurred_at` gte/lt, `device_id=in.(…)`, `violation_types=ov.{…}`, `order=occurred_at.desc`, `offset/limit` + `Prefer: count=exact`. 이미지는 `createSignedUrl`(기본 120초) |
+| 접근 | 토큰 없는 요청은 거부. 쓰기는 service_role(cloud-sync, seed)만 |
 
 미결 사항(TODO):
 - 장치 목록: 지금은 최근 1000행에서 추출 → 장치 테이블/뷰가 생기면 교체
 - 요약/차트: 경량 컬럼을 최대 5000행 조회해 클라이언트에서 집계 → 데이터가 늘면 집계 RPC/뷰로 교체
+- 정식 마이그레이션은 `cloud/` 로 옮긴다(`seed/schema.sql` 은 dev 전용)
 
 ## 테스트
 
@@ -169,4 +219,6 @@ cd dashboard
 - `test_server.py`: 허용 경로 외 파일이 노출되지 않는지, 설정 주입, 고권한 키 거부, 잘못된 설정 즉시 실패, 보안 헤더, 환경변수 파싱.
 - `test_sample_contract.py`: 브라우저에서 `js/sample-data.js`를 실행해 얻은 행을 `contracts/supabase-event-record`, `ppe-event` 스키마로 검증(`jsonschema` + `$ref` 레지스트리). 비정규화 컬럼 일치, `storage_path` 날짜 규칙, 시각 출처 규칙, 결정성도 확인한다. 계약이 바뀌면 이 테스트가 먼저 깨진다.
 - `test_dashboard_e2e.py`: 실제 FastAPI 앱(uvicorn, 임의 포트, 샘플 모드)을 헤드리스 Chromium으로 연다. JS 예외나 콘솔 오류(CSP 위반·404 포함)가 나면 실패한다.
+- `test_seed.py`: seed 가데이터가 계약·시간·ID·dedup 규칙을 지키는지, JPEG 메타데이터 일치, 업로드 순서·헤더·409 해시 비교·401 중단(네트워크는 `httpx.MockTransport`).
+- `test_supabase_mode.py`: supabase 모드로 띄운 대시보드가 supabase-js(CDN, 인터넷 필요)로 보내는 요청을 `fake_supabase.py` 가 받아 형식을 검증한다. 실제 Supabase 프로젝트와의 통신은 아니다.
 - 테스트는 로컬 `.env` 와 무관하게 기본 설정(샘플)으로 돈다.

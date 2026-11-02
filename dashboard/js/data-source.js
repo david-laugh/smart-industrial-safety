@@ -75,7 +75,7 @@
 
   // ---------------- Supabase ----------------
   // cloud/README.md 설계(ppe_events select, ppe-evidence Signed URL)를 전제로 한다.
-  // 로그인 없이 anon 키로 조회하므로 RLS가 anon 읽기를 허용해야 한다(cloud/ 설계는 authenticated 전제 → 조정 필요).
+  // 개발용 테이블/버킷/RLS: dashboard/seed/schema.sql
 
   function loadScript(src) {
     return new Promise((resolve, reject) => {
@@ -92,7 +92,10 @@
       throw new Error("supabaseUrl / supabaseAnonKey 가 설정되지 않았습니다 (config.local.js).");
     }
     if (!window.supabase) await loadScript(cfg.supabaseJsUrl);
-    const sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
+    // 로그인 세션 없이 토큰(anon key)만으로 요청한다. 접근 허용 여부는 서버 RLS가 토큰의 role로 판단.
+    const sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    });
 
     function applyFilter(q, f) {
       if (f.from) q = q.gte("occurred_at", f.from);

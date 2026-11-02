@@ -7,6 +7,8 @@
   const DEVICES = ["cam-line-a-01", "cam-line-a-02", "cam-line-b-01", "cam-warehouse-01"];
   const IMAGE_W = 640;
   const IMAGE_H = 480;
+  const DEDUP_WINDOW_S = 30;
+  const DEDUP_GRID = 4;
   const MODEL = {
     name: "ppe-detector",
     version: "0.1.0",
@@ -106,6 +108,19 @@
     return out;
   }
 
+  // docs/protocols.md §중복 방지:
+  // {device_id}|{track_id 또는 pos:r{행}c{열}}|{정렬된 violation_types를 ,로 연결}|{window_start_epoch_s}
+  // pos 는 bbox 중심을 PPE_DEDUP_GRID(4x4) 격자로 양자화(0부터).
+  function makeDedupKey(deviceId, v, occurredMs) {
+    const cx = (v.bbox.x_min + v.bbox.x_max) / 2;
+    const cy = (v.bbox.y_min + v.bbox.y_max) / 2;
+    const cell = (x) => Math.min(DEDUP_GRID - 1, Math.floor(x * DEDUP_GRID));
+    const who = v.track_id || `pos:r${cell(cy)}c${cell(cx)}`;
+    const types = v.violation_types.slice().sort().join(",");
+    const windowStart = Math.floor(occurredMs / 1000 / DEDUP_WINDOW_S) * DEDUP_WINDOW_S;
+    return `${deviceId}|${who}|${types}|${windowStart}`;
+  }
+
   function makeEvent(rand, occurredMs, deviceId) {
     const sntp = rand() < 0.85;
     const captureMs = occurredMs;
@@ -117,8 +132,7 @@
     const imageSha = hex(rand, 64);
     const violations = makeViolations(rand);
     const types = Array.from(new Set(violations.flatMap((v) => v.violation_types)));
-    const firstType = violations[0].violation_types[0];
-    const pos = `r${1 + Math.floor(rand() * 3)}c${1 + Math.floor(rand() * 3)}`;
+    const dedupKey = makeDedupKey(deviceId, violations[0], occurredUsed);
 
     const payload = {
       schema_version: "1.0.0",
@@ -149,8 +163,8 @@
       model: Object.assign({ sha256: "0".repeat(64) }, MODEL),
       decision: {
         policy_version: "0.1.0",
-        dedup_key: `${deviceId}|pos:${pos}|${firstType}|${Math.floor(occurredUsed / 1000)}`,
-        dedup_window_s: 30,
+        dedup_key: dedupKey,
+        dedup_window_s: DEDUP_WINDOW_S,
         frames_considered: 3 + Math.floor(rand() * 3),
       },
     };

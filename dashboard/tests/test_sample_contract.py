@@ -1,5 +1,6 @@
 """샘플 데이터(js/sample-data.js)가 contracts/ 계약을 지키는지 검증한다."""
 
+import re
 from datetime import datetime
 
 import pytest
@@ -93,3 +94,12 @@ def test_sorted_newest_first_and_ids_unique(sample_rows):
 
 def test_generation_is_deterministic(page):
     assert page.evaluate(f"JSON.stringify({GENERATE}) === JSON.stringify({GENERATE})")
+
+
+def test_dedup_key_follows_protocol(sample_rows):
+    # docs/protocols.md §중복 방지
+    pattern = re.compile(r"^[a-z0-9-]+\|(trk-[0-9a-f]{6}|pos:r[0-3]c[0-3])\|(HELMET_MISSING|HELMET_MISSING,VEST_MISSING|VEST_MISSING)\|\d+$")
+    for row in sample_rows:
+        d = row["event_payload"]["decision"]
+        assert pattern.match(d["dedup_key"]), d["dedup_key"]
+        assert int(d["dedup_key"].rsplit("|", 1)[1]) % d["dedup_window_s"] == 0
