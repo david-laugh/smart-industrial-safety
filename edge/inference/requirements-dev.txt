@@ -1,0 +1,9 @@
+# 개발/테스트 전용 (런타임 이미지에 넣지 않는다)
+-r requirements.txt
+ultralytics>=8.3      # 모델 확인, ONNX 변환, PyTorch 비교 (torch 포함)
+onnx>=1.15            # export 결과 확인
+onnxslim>=0.1         # export simplify=True
+huggingface_hub>=0.20 # best.pt 다운로드(선택)
+jsonschema>=4.18      # 계약 검증 (referencing 기반 $ref 해석)
+referencing>=0.30
+pytest>=7.4
