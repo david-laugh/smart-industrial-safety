@@ -61,7 +61,7 @@ def on_frame_selected(edge_frame: dict, jpeg: bytes) -> None:
  "model":{"name":"yolov8n-ppe-hansung-cho","version":"hf-ac0027b-onnx-op12",
    "sha256":"846b747b01505804e384c16b5136b55754a9e64ec2de5f1fe2d32f3ffee64721",
    "input_width":640,"input_height":640,"runtime":"onnxruntime","runtime_version":"1.31.1"},
- "decision":{"policy_version":"0.0.0","dedup_key":"cam-line-a-01|pos:r2c1|HELMET_MISSING|1793581200",
+ "decision":{"policy_version":"0.1.0","dedup_key":"cam-line-a-01|pos:r2c1|HELMET_MISSING|1793581200",
    "dedup_window_s":30,"frames_considered":3}}
 ```
 
@@ -127,7 +127,7 @@ INFERENCE_PPE_MIN_CONFIDENCE=0.5
 INFERENCE_MIN_PERSON_BOX_PX=
 
 # ---- PPE Decision (인터페이스 4) ----
-PPE_POLICY_VERSION=0.0.0
+PPE_POLICY_VERSION=0.1.0
 PPE_DECISION_WINDOW_FRAMES=5
 PPE_DECISION_MIN_MISSING_FRAMES=3
 PPE_UNKNOWN_IS_VIOLATION=false
@@ -136,7 +136,7 @@ PPE_DEDUP_GRID=4x4
 TIME_MAX_DEVICE_SKEW_MS=2000
 ```
 
-> `PPE_POLICY_VERSION` 은 코드 기본값이 `.env.example` 과 같은 `0.0.0` 이다. 첫 정책 확정 시 올릴 것을 제안(예: `0.1.0`).
+> `PPE_POLICY_VERSION` 코드 기본값은 `0.1.0`(B 판정 로직 확정본). `.env.example` 의 `0.0.0` 을 `0.1.0` 으로 바꿔 주세요(D).
 
 ### 6.2 B 가 새로 추가한 변수 (모두 선택, 비우면 기본값)
 
@@ -148,7 +148,7 @@ INFERENCE_MODEL_VERSION=hf-ac0027b-onnx-op12    # 이벤트 model.version (≤32
 INFERENCE_PERSON_SOURCE=auto                    # auto | model | esp32 (별칭 PERSON_SOURCE)
 INFERENCE_PPE_WORN_MIN_CONFIDENCE=0.5           # 착용 클래스 임계값
 INFERENCE_PPE_MISSING_MIN_CONFIDENCE=0.5        # 미착용 클래스 임계값
-INFERENCE_MIN_PERSON_BOX_RATIO=0.33             # 판정 가능 최소 사람 박스 높이(이미지 높이 대비)
+INFERENCE_MIN_PERSON_BOX_RATIO=0.25             # 판정 가능 최소 사람 박스 높이(이미지 높이 대비)
 INFERENCE_DET_MIN_CONFIDENCE=0.25               # NMS 전 후보 하한
 INFERENCE_NMS_IOU=0.7                           # 클래스별 NMS IoU
 INFERENCE_MAX_DET=300
@@ -166,12 +166,14 @@ PPE_EVENT_SCHEMA_VERSION=1.0.0                  # ppe-event schema_version
 
 개발 전용: `CONTRACTS_DIR`(계약 검증 헬퍼의 스키마 위치, 기본 저장소 `contracts/`).
 
-## 7. 판정 정책 요약 (policy 0.0.0)
+## 7. 판정 정책 요약 (policy 0.1.0)
 
 - 추론: 단일 모델(Person/Hardhat/NO-Hardhat/Safety Vest/NO-Safety Vest), 클래스별 NMS, 사람 박스 상단 0~25% 안전모 / 20~70% 조끼 영역에 연관.
-- 판정 불가(UNKNOWN): 사람 점수 < 0.5, 박스 높이 < 이미지 높이 × 0.33, 부위가 이미지 경계에서 잘림.
+- 판정 불가(UNKNOWN): 사람 점수 < 0.5, 박스 높이 < 이미지 높이 × 0.25, 부위가 이미지 경계에서 잘림.
 - 평활화: (장치, 격자 셀)별 최근 5프레임 중 3프레임 이상 MISSING + 현재 프레임 MISSING → 확정. UNKNOWN 은 세지 않음.
-- dedup: `{device_id}|pos:r{r}c{c}|{types}|{floor(t/30)*30}`, 같은 (장치, 셀, 유형)은 마지막 발행 후 30초 동안 재발행 안 함.
+- 판정 불가(helmet·vest 모두 UNKNOWN) 사람은 셀 배정·평활화에서 제외.
+- dedup: 억제는 (장치, 셀, 위반 유형) 단위로 30초. 이벤트에는 새로 확정되고 억제되지 않은 유형만 담고, 동시 확정은 한 이벤트로 묶음
+  (HELMET 발행 후 VEST 가 나중에 확정되면 VEST_MISSING 이벤트 1건 추가). 키: `{device_id}|pos:r{r}c{c}|{이벤트 유형}|{floor(t/30)*30}`.
 - `track_id` 는 항상 null(추적기 없음).
 
 ## 8. 검증 방법
@@ -189,7 +191,7 @@ python edge/ppe_decision/tools/run_replay.py --video data/test_videos/ppe_safety
 ## 9. 알려진 제한 / 대기 중인 결정
 
 - 추적기 없음 → 사람이 격자 셀을 크게 이동하면 평활화 창이 끊기고 dedup 이 새 셀로 다시 시작될 수 있음.
-- 박스 기준(0.33), 임계값(0.5)은 테스트 영상 1개 기준 → 실제 ESP32 프레임으로 재조정 필요.
+- 박스 기준(0.25), 임계값(0.5)은 테스트 영상 2개 기준 → 실제 ESP32 프레임으로 재조정 필요.
 - `edge_detection.persons`(ESP32 사람 박스)는 스키마 1.1.0 대기. 현재 스키마(`additionalProperties: false`)로는
   edge-frame 검증에 실패하므로, 1.1.0 반영 전까지 `INFERENCE_PERSON_SOURCE=auto`(=모델 Person) 사용.
 - Pi 5 지연·메모리 미측정. 측정 도구: `edge/inference/tools/bench_pi.py`(README 참고).

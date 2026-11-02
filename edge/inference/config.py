@@ -88,9 +88,10 @@ class InferenceConfig:
     ppe_worn_min_confidence: float = 0.5
     ppe_missing_min_confidence: float = 0.5
     # 판정 가능한 최소 사람 박스 높이. 기본은 이미지 높이 대비 비율(테스트 영상 1개 기준, ESP32 실프레임으로 재조정 필요).
-    # ESP32 640x480 에서 0.33 ≈ 158px (Phase 2: 원경 인물 46~132px, 주 작업자 275~462px).
+    # ESP32 640x480 에서 0.25 = 120px. 근거: 3인 영상 원경 인물 0.10~0.275(MISSING 판정 0건),
+    # 걸어오는 작업자 영상 최소 0.255 → 0.33 대비 helmet/vest 재현율 0.50/0.72 → 0.76/0.98.
     # INFERENCE_MIN_PERSON_BOX_PX 가 설정되면 px 값이 우선한다.
-    min_person_box_ratio: float = 0.33
+    min_person_box_ratio: float = 0.25
     min_person_box_px: Optional[int] = None
     edge_margin_px: float = 2.0        # 사람 박스가 이미지 경계에서 이 거리 이내면 '잘림'으로 본다
     person_source: str = "auto"        # auto | model | esp32

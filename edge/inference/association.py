@@ -10,7 +10,7 @@
 2. 영역: 사람 박스 높이 기준 위에서부터 helmet_region(기본 0~25%), vest_region(기본 20~70%), 가로는 사람 박스 전체.
 3. 연관: PPE 박스 중심이 영역 안 AND IoA(PPE∩영역 / PPE 면적) ≥ assoc_min_ioa.
    PPE 박스 하나는 조건을 만족하는 판정 가능 사람 중 IoA 가 가장 큰 1명에게만 할당
-   (동률 → 사람 박스와의 교차 면적 → person_confidence → person_index 순).
+   (동률 → PPE 중심과 사람 박스 가로 중심의 거리(사람 폭 대비)가 작은 쪽 → 교차 면적 → person_confidence → person_index).
 4. 상태(항목별):
    - 착용 클래스 최고 점수 ≥ worn_min, 미착용 클래스 최고 점수 ≥ missing_min 둘 다 → 점수 높은 쪽(완전 동률은 UNKNOWN)
    - 하나만 → 그 상태, confidence = 그 점수
@@ -52,7 +52,7 @@ class AssocParams:
     person_min_confidence: float = 0.5
     worn_min_confidence: float = 0.5
     missing_min_confidence: float = 0.5
-    min_person_box_ratio: float = 0.33
+    min_person_box_ratio: float = 0.25
     min_person_box_px: Optional[float] = None
     helmet_region: Tuple[float, float] = (0.0, 0.25)
     vest_region: Tuple[float, float] = (0.2, 0.7)
@@ -137,7 +137,11 @@ def assign_ppe(persons: Sequence[PersonBox], ppe: Sequence[PPEBox], prm: AssocPa
             ioa = _inter(d.xyxy, r) / a
             if ioa < prm.assoc_min_ioa:
                 continue
-            key = (ioa, _inter(d.xyxy, persons[i].xyxy), persons[i].score, -i)
+            pb = persons[i].xyxy
+            # IoA 동점이면 PPE 중심이 사람 박스 가로 중심에 더 가까운 사람(앞뒤로 겹친 사람의 머리가
+            # 두 사람 안전모 영역에 모두 IoA 1.0 으로 들어가는 경우, 사람 점수가 아닌 위치로 결정)
+            rel = abs((d.xyxy[0] + d.xyxy[2]) / 2 - (pb[0] + pb[2]) / 2) / max(pb[2] - pb[0], 1e-6)
+            key = (round(ioa, 6), -rel, _inter(d.xyxy, pb), persons[i].score, -i)
             if best_key is None or key > best_key:
                 best_key, best_i = key, i
         if best_i is not None:
