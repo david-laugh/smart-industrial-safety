@@ -65,7 +65,7 @@ result = engine.infer(edge_frame, jpeg)
 | `INFERENCE_PERSON_MIN_CONFIDENCE` | 0.5 | |
 | `INFERENCE_PPE_WORN_MIN_CONFIDENCE` | 0.5 | 미설정 시 `INFERENCE_PPE_MIN_CONFIDENCE` |
 | `INFERENCE_PPE_MISSING_MIN_CONFIDENCE` | 0.5 | 미설정 시 `INFERENCE_PPE_MIN_CONFIDENCE` |
-| `INFERENCE_MIN_PERSON_BOX_RATIO` | 0.33 | 이미지 높이 대비 최소 사람 박스 높이 |
+| `INFERENCE_MIN_PERSON_BOX_RATIO` | 0.25 | 이미지 높이 대비 최소 사람 박스 높이 |
 | `INFERENCE_MIN_PERSON_BOX_PX` | (없음) | 설정하면 비율보다 우선 |
 | `INFERENCE_DET_MIN_CONFIDENCE` / `INFERENCE_NMS_IOU` / `INFERENCE_MAX_DET` | 0.25 / 0.7 / 300 | 검출 후처리 |
 | `INFERENCE_HELMET_REGION` / `INFERENCE_VEST_REGION` | `0.0,0.25` / `0.2,0.7` | 사람 박스 높이 대비 영역 |
@@ -75,7 +75,7 @@ result = engine.infer(edge_frame, jpeg)
 
 빈 문자열 값은 미설정으로 본다.
 
-> **최소 박스 기준(0.33)과 임계값(0.5)은 테스트 영상 1개 기준 값이며 실제 ESP32 프레임으로 재조정이 필요하다.**
+> **최소 박스 기준(0.25)과 임계값(0.5)은 테스트 영상 2개 기준 값이며 실제 ESP32 프레임으로 재조정이 필요하다.**
 
 ## 개발 PC 에서 실행
 

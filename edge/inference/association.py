@@ -52,7 +52,7 @@ class AssocParams:
     person_min_confidence: float = 0.5
     worn_min_confidence: float = 0.5
     missing_min_confidence: float = 0.5
-    min_person_box_ratio: float = 0.33
+    min_person_box_ratio: float = 0.25
     min_person_box_px: Optional[float] = None
     helmet_region: Tuple[float, float] = (0.0, 0.25)
     vest_region: Tuple[float, float] = (0.2, 0.7)

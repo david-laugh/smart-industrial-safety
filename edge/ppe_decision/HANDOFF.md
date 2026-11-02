@@ -148,7 +148,7 @@ INFERENCE_MODEL_VERSION=hf-ac0027b-onnx-op12    # 이벤트 model.version (≤32
 INFERENCE_PERSON_SOURCE=auto                    # auto | model | esp32 (별칭 PERSON_SOURCE)
 INFERENCE_PPE_WORN_MIN_CONFIDENCE=0.5           # 착용 클래스 임계값
 INFERENCE_PPE_MISSING_MIN_CONFIDENCE=0.5        # 미착용 클래스 임계값
-INFERENCE_MIN_PERSON_BOX_RATIO=0.33             # 판정 가능 최소 사람 박스 높이(이미지 높이 대비)
+INFERENCE_MIN_PERSON_BOX_RATIO=0.25             # 판정 가능 최소 사람 박스 높이(이미지 높이 대비)
 INFERENCE_DET_MIN_CONFIDENCE=0.25               # NMS 전 후보 하한
 INFERENCE_NMS_IOU=0.7                           # 클래스별 NMS IoU
 INFERENCE_MAX_DET=300
@@ -169,8 +169,9 @@ PPE_EVENT_SCHEMA_VERSION=1.0.0                  # ppe-event schema_version
 ## 7. 판정 정책 요약 (policy 0.0.0)
 
 - 추론: 단일 모델(Person/Hardhat/NO-Hardhat/Safety Vest/NO-Safety Vest), 클래스별 NMS, 사람 박스 상단 0~25% 안전모 / 20~70% 조끼 영역에 연관.
-- 판정 불가(UNKNOWN): 사람 점수 < 0.5, 박스 높이 < 이미지 높이 × 0.33, 부위가 이미지 경계에서 잘림.
+- 판정 불가(UNKNOWN): 사람 점수 < 0.5, 박스 높이 < 이미지 높이 × 0.25, 부위가 이미지 경계에서 잘림.
 - 평활화: (장치, 격자 셀)별 최근 5프레임 중 3프레임 이상 MISSING + 현재 프레임 MISSING → 확정. UNKNOWN 은 세지 않음.
+- 판정 불가(helmet·vest 모두 UNKNOWN) 사람은 셀 배정·평활화에서 제외.
 - dedup: `{device_id}|pos:r{r}c{c}|{types}|{floor(t/30)*30}`, 같은 (장치, 셀, 유형)은 마지막 발행 후 30초 동안 재발행 안 함.
 - `track_id` 는 항상 null(추적기 없음).
 
@@ -189,7 +190,7 @@ python edge/ppe_decision/tools/run_replay.py --video data/test_videos/ppe_safety
 ## 9. 알려진 제한 / 대기 중인 결정
 
 - 추적기 없음 → 사람이 격자 셀을 크게 이동하면 평활화 창이 끊기고 dedup 이 새 셀로 다시 시작될 수 있음.
-- 박스 기준(0.33), 임계값(0.5)은 테스트 영상 1개 기준 → 실제 ESP32 프레임으로 재조정 필요.
+- 박스 기준(0.25), 임계값(0.5)은 테스트 영상 2개 기준 → 실제 ESP32 프레임으로 재조정 필요.
 - `edge_detection.persons`(ESP32 사람 박스)는 스키마 1.1.0 대기. 현재 스키마(`additionalProperties: false`)로는
   edge-frame 검증에 실패하므로, 1.1.0 반영 전까지 `INFERENCE_PERSON_SOURCE=auto`(=모델 Person) 사용.
 - Pi 5 지연·메모리 미측정. 측정 도구: `edge/inference/tools/bench_pi.py`(README 참고).

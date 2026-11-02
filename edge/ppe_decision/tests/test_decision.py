@@ -207,6 +207,24 @@ def test_sticky_cell_across_grid_boundary():
     assert evs[2] is not None
 
 
+def test_unknown_person_in_same_cell_does_not_split_violator():
+    """걸어오는 작업자 영상 회귀: 뒤쪽 원경 인물(UNKNOWN)이 같은 셀에 있어도 위반자는 이벤트 1건."""
+    seq = []
+    for k in range(40):
+        y0 = 0.11 + k * 0.012                       # 주 작업자: 아래로 이동하며 커짐
+        main = person(0, "MISSING", "WORN", bbox=(0.45, y0, 0.57, min(1.0, y0 + 0.25 + k * 0.01)))
+        back = person(1, "UNKNOWN", "UNKNOWN", bbox=(0.51, 0.04, 0.55, 0.13))
+        dup = [person(2, "UNKNOWN", "UNKNOWN", bbox=(0.51, 0.05, 0.53, 0.09))] if k % 7 == 3 else []
+        seq.append([main, back] + dup)
+    evs = run_all(decider(), seq)
+    assert sum(len(x) for x in evs) == 1
+
+
+def test_unknown_persons_tracked_when_unknown_is_violation():
+    evs = run(decider(unknown_is_violation=True), [[person(0, "UNKNOWN", "UNKNOWN")]] * 3)
+    assert evs[2] is not None
+
+
 def test_devices_are_independent():
     d = decider()
     n = 0

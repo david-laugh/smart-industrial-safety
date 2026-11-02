@@ -4,6 +4,8 @@
 - 같은 사람 식별(추적기 없음): bbox 중심을 PPE_DEDUP_GRID 격자로 양자화한 셀 "pos:r{행}c{열}".
   격자 경계 떨림 방지(sticky): 해당 장치에서 이미 추적 중인 셀의 마지막 중심과 거리(격자 단위)가
   PPE_CELL_STICKY_DIST(기본 0.5) 이하이면 가장 가까운 기존 셀을 그대로 쓴다.
+  helmet·vest 가 모두 UNKNOWN 인 사람은 셀 배정·창·sticky 중심 계산에서 제외한다(B-lite).
+  (PPE_UNKNOWN_IS_VIOLATION=true 면 포함)
 - 평활화: (device_id, 셀)마다 해당 장치의 최근 PPE_DECISION_WINDOW_FRAMES 프레임 상태를 보관.
   그 프레임에 셀에 사람이 없으면 ABSENT 로 기록(미착용으로 세지 않음).
   항목(helmet/vest)별로 창 안 MISSING 수 ≥ PPE_DECISION_MIN_MISSING_FRAMES 이고
@@ -136,11 +138,22 @@ class PPEDecision:
     def _counts_as_missing(self, status: str) -> bool:
         return status == MISSING or (self.cfg.unknown_is_violation and status == UNKNOWN)
 
+    def _trackable(self, p: Dict[str, Any]) -> bool:
+        """평활화 대상인지: 둘 다 UNKNOWN 이면 제외(단 UNKNOWN 을 위반으로 세는 정책이면 포함)."""
+        if self.cfg.unknown_is_violation:
+            return True
+        return p["helmet"]["status"] != UNKNOWN or p["vest"]["status"] != UNKNOWN
+
     def _update_windows(self, device_id: str, persons: List[Dict[str, Any]]) -> Dict[int, Cell]:
         """사람별 셀 배정 후 창 갱신. 반환: {person_index: cell}"""
         by_cell: Dict[Cell, List[Dict[str, Any]]] = {}
         assigned: Dict[int, Cell] = {}
         for p in sorted(persons, key=lambda q: q["person_index"]):
+            if not self._trackable(p):
+                # B-lite: 판정 불가 사람(둘 다 UNKNOWN)은 셀 배정·창·sticky 중심에서 제외.
+                # (원경 인물/저신뢰 중복 박스가 같은 셀의 평균 중심을 끌어 실제 위반자를 새 셀로 떼어내는 것 방지)
+                assigned[p["person_index"]] = self.cell_of(p["bbox"])
+                continue
             cell = self.assign_cell(device_id, p["bbox"])
             assigned[p["person_index"]] = cell
             by_cell.setdefault(cell, []).append(p)
