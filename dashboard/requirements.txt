@@ -1,0 +1,4 @@
+# 대시보드 실행 서버(FastAPI + uvicorn). 정적 파일 서빙 + 환경변수 기반 런타임 설정 주입.
+fastapi>=0.115
+uvicorn[standard]>=0.32
+python-dotenv>=1.0
