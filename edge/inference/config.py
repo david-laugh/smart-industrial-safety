@@ -87,7 +87,8 @@ class InferenceConfig:
     person_min_confidence: float = 0.5
     ppe_worn_min_confidence: float = 0.5
     ppe_missing_min_confidence: float = 0.5
-    min_person_box_px: int = 64        # 실제 입력(ESP32 640x480) 기준 사람 박스 높이(px)
+    min_person_box_px: int = 160       # 실제 입력(ESP32 640x480) 기준 사람 박스 높이(px). Phase 2: 원경 46~132px
+    edge_margin_px: float = 2.0        # 사람 박스가 이미지 경계에서 이 거리 이내면 '잘림'으로 본다
     person_source: str = "auto"        # auto | model | esp32
 
     # 연관 영역(사람 박스 높이 대비 비율, 위에서부터)
@@ -129,6 +130,7 @@ class InferenceConfig:
             ppe_worn_min_confidence=_float(env, "INFERENCE_PPE_WORN_MIN_CONFIDENCE", ppe_common),
             ppe_missing_min_confidence=_float(env, "INFERENCE_PPE_MISSING_MIN_CONFIDENCE", ppe_common_missing),
             min_person_box_px=_int(env, "INFERENCE_MIN_PERSON_BOX_PX", d.min_person_box_px),
+            edge_margin_px=_float(env, "INFERENCE_EDGE_MARGIN_PX", d.edge_margin_px),
             person_source=person_source,
             helmet_region=_range(env, "INFERENCE_HELMET_REGION", d.helmet_region),
             vest_region=_range(env, "INFERENCE_VEST_REGION", d.vest_region),
