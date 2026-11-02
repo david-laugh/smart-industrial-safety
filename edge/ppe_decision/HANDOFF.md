@@ -172,7 +172,8 @@ PPE_EVENT_SCHEMA_VERSION=1.0.0                  # ppe-event schema_version
 - 판정 불가(UNKNOWN): 사람 점수 < 0.5, 박스 높이 < 이미지 높이 × 0.25, 부위가 이미지 경계에서 잘림.
 - 평활화: (장치, 격자 셀)별 최근 5프레임 중 3프레임 이상 MISSING + 현재 프레임 MISSING → 확정. UNKNOWN 은 세지 않음.
 - 판정 불가(helmet·vest 모두 UNKNOWN) 사람은 셀 배정·평활화에서 제외.
-- dedup: `{device_id}|pos:r{r}c{c}|{types}|{floor(t/30)*30}`, 같은 (장치, 셀, 유형)은 마지막 발행 후 30초 동안 재발행 안 함.
+- dedup: 억제는 (장치, 셀, 위반 유형) 단위로 30초. 이벤트에는 새로 확정되고 억제되지 않은 유형만 담고, 동시 확정은 한 이벤트로 묶음
+  (HELMET 발행 후 VEST 가 나중에 확정되면 VEST_MISSING 이벤트 1건 추가). 키: `{device_id}|pos:r{r}c{c}|{이벤트 유형}|{floor(t/30)*30}`.
 - `track_id` 는 항상 null(추적기 없음).
 
 ## 8. 검증 방법

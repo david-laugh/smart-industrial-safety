@@ -143,3 +143,17 @@ def test_bbox_normalized_and_schema_shape():
     b = r["bbox"]
     assert 0 <= b["x_min"] <= b["x_max"] <= 1 and 0 <= b["y_min"] <= b["y_max"] <= 1
     assert r["track_id"] is None and r["person_index"] == 0
+
+
+def test_ioa_tie_goes_to_person_with_nearer_horizontal_center():
+    """앞뒤로 겹친 두 사람: 뒤 사람 머리의 NO-Hardhat 이 두 사람 안전모 영역에 모두 IoA 1.0.
+    사람 점수(앞사람이 더 높음)가 아니라 가로 중심이 가까운 뒤 사람에게 할당돼야 한다."""
+    front = PersonBox((200.0, 55.0, 425.0, 478.0), 0.90)   # 가로 중심 312
+    back = PersonBox((340.0, 60.0, 475.0, 478.0), 0.70)    # 가로 중심 407
+    no_helmet = PPEBox("no_helmet", (385.0, 68.0, 425.0, 100.0), 0.80)   # 중심 405
+    helmet = PPEBox("helmet", (270.0, 60.0, 360.0, 135.0), 0.90)         # 중심 315
+    assigned = assign_ppe([front, back], [no_helmet, helmet], PRM, H)
+    assert assigned[0] == [helmet] and assigned[1] == [no_helmet]
+    rf, rb = one([front, back], [no_helmet, helmet])
+    assert rf["helmet"] == {"status": WORN, "confidence": 0.9}
+    assert rb["helmet"] == {"status": MISSING, "confidence": 0.8}

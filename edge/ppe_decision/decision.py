@@ -13,10 +13,12 @@
   UNKNOWN 은 PPE_UNKNOWN_IS_VIOLATION=true 일 때만 MISSING 으로 센다.
   같은 셀에 여러 사람이 있으면 항목별 우선순위 MISSING > WORN > UNKNOWN 으로 셀 상태를 정한다.
 - 위반 유형: HELMET_MISSING, VEST_MISSING (정렬).
-- dedup_key = "{device_id}|pos:r{r}c{c}|{정렬 위반유형 ,연결}|{window_start_epoch_s}"
+- dedup: 억제 상태는 (device_id, 셀, 위반 유형) 단위. 같은 유형은 마지막 발행 후 PPE_DEDUP_WINDOW_S 초 동안
+  재발행하지 않는다(버킷 경계를 넘어도 창 안이면 억제, 같은 버킷도 억제).
+  이벤트에는 이번에 새로 확정됐고 아직 억제되지 않은 유형만 넣고, 동시에 확정된 유형은 한 이벤트로 묶는다.
+  새 유형이 없으면 이벤트를 내지 않는다(예: HELMET 발행 후 VEST 가 나중에 확정 → VEST_MISSING 이벤트 1건 추가).
+  dedup_key = "{device_id}|pos:r{r}c{c}|{이벤트에 들어간 유형 정렬 ,연결}|{window_start_epoch_s}"
   window_start_epoch_s = floor(occurred_epoch_s / PPE_DEDUP_WINDOW_S) * PPE_DEDUP_WINDOW_S
-  억제: 같은 (device_id, 셀, 위반유형) 이 마지막 발행 후 PPE_DEDUP_WINDOW_S 초 안이면 재발행하지 않음
-  (버킷 경계를 넘어도 창 안이면 억제). 같은 키도 재발행하지 않음.
 - 위반자마다 별도 이벤트(자기 event_id, 자기 dedup_key, violations 1개, event_id 별 증거 JPEG).
   dedup_key 형식이 pos 하나를 포함하므로 계약 의도와 일치한다.
 - 결정적 동작: 같은 입력 시퀀스 → 같은 판정. event_id, decided_at 만 다르며 둘 다 주입 가능.
@@ -109,8 +111,8 @@ class PPEDecision:
         self._windows: Dict[Tuple[str, Cell], Deque[Tuple[str, str]]] = {}
         # (device_id, cell) → 마지막 중심(격자 단위 x, y)
         self._centers: Dict[Tuple[str, Cell], Tuple[float, float]] = {}
-        # (device_id, cell, types) → (last_emit_epoch_s, last_key)
-        self._emitted: Dict[Tuple[str, Cell, str], Tuple[float, str]] = {}
+        # (device_id, cell, violation_type) → (last_emit_epoch_s, window_start_epoch_s)
+        self._emitted: Dict[Tuple[str, Cell, str], Tuple[float, int]] = {}
 
     # ------------------------------------------------------------------
     def _grid_center(self, bbox: Dict[str, float]) -> Tuple[float, float]:
@@ -223,16 +225,22 @@ class PPEDecision:
             types = self._confirmed(device_id, cell, p)
             if not types:
                 continue
-            tkey = ",".join(types)
-            dkey = f"{device_id}|pos:r{cell[0]}c{cell[1]}|{tkey}|{window_start}"
-            sup_key = (device_id, cell, tkey)
-            last = self._emitted.get(sup_key)
-            if last is not None and (last[1] == dkey or 0 <= occ_s - last[0] < w):
+            # 억제는 (장치, 셀, 위반 유형) 단위. 이번에 확정됐고 아직 억제되지 않은 유형만 이벤트에 넣는다.
+            new_types = []
+            for vt in types:
+                sup_key = (device_id, cell, vt)
+                last = self._emitted.get(sup_key)
+                if last is not None and (last[1] == window_start or 0 <= occ_s - last[0] < w):
+                    continue
+                if sup_key in seen:  # 같은 프레임·같은 셀의 중복 사람
+                    continue
+                new_types.append(vt)
+            if not new_types:
                 continue
-            if sup_key in seen:  # 같은 프레임·같은 셀의 중복 사람
-                continue
-            seen.add(sup_key)
-            candidates.append((p, types, sup_key, dkey, len(self._windows[(device_id, cell)])))
+            sup_keys = [(device_id, cell, vt) for vt in new_types]
+            seen.update(sup_keys)
+            dkey = f"{device_id}|pos:r{cell[0]}c{cell[1]}|{','.join(new_types)}|{window_start}"
+            candidates.append((p, new_types, sup_keys, dkey, len(self._windows[(device_id, cell)])))
 
         events: List[Dict[str, Any]] = []
         if not candidates:
@@ -242,7 +250,7 @@ class PPEDecision:
         if img_size is None:
             img_size = (inference_result["image_size"]["width"], inference_result["image_size"]["height"])
         jpeg_sha = hashlib.sha256(jpeg).hexdigest()
-        for p, types, sup_key, dkey, frames_considered in candidates:
+        for p, types, sup_keys, dkey, frames_considered in candidates:
             event_id = self.id_fn()
             event = {
                 "schema_version": self.cfg.schema_version,
@@ -288,6 +296,7 @@ class PPEDecision:
             if self.publisher is not None:
                 # 실패 시 예외 → 이 이벤트의 dedup 상태 미기록(다음 프레임에서 재발행). 앞서 게시된 이벤트는 유지.
                 self.publisher.publish(event, jpeg)
-            self._emitted[sup_key] = (occ_s, dkey)
+            for sk in sup_keys:
+                self._emitted[sk] = (occ_s, window_start)
             events.append(event)
         return events
