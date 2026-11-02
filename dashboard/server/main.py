@@ -6,8 +6,8 @@
 - `/api/*`       DASHBOARD_DATA_SOURCE=supabase 일 때 조회 API (server/supabase_api.py)
 - `/healthz`     상태 확인(토큰 불필요)
 
-접근 제어(SYS-SEC-01): DASHBOARD_ACCESS_TOKEN. 처음 `/?token=…` 으로 열면 httpOnly 쿠키로 바꾸고 주소에서 토큰을 지운다.
-API 는 쿠키 또는 `Authorization: Bearer <token>`. 토큰이 없거나 틀리면 401.
+접근 제어(선택): DASHBOARD_ACCESS_TOKEN 이 비어 있으면 토큰 없이 바로 보인다(내부망 전제).
+값을 넣으면 `/?token=…` 으로 열 때 httpOnly 쿠키로 바꾸고, 토큰이 없거나 틀리면 401. API 는 `Authorization: Bearer <token>` 도 허용.
 Supabase secret 키는 서버에만 있고 브라우저로 내려가지 않는다.
 
 uvicorn 직접 실행: `uvicorn server.main:create_app --factory` (설정은 기동 시점의 환경변수/.env 에서 읽음)
@@ -83,8 +83,6 @@ class Settings:
             raise ValueError("SUPABASE_URL 은 https:// 여야 합니다.")
         if _is_public_key(self.service_key):
             raise ValueError("SUPABASE_SERVICE_KEY 에 publishable/anon 키가 들어 있습니다. secret(service_role) 키가 필요합니다.")
-        if not self.access_token:
-            raise ValueError("DASHBOARD_DATA_SOURCE=supabase 에는 DASHBOARD_ACCESS_TOKEN 이 필요합니다(비인증 접근 차단).")
 
 
 def read_service_key(env):

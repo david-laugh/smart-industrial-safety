@@ -74,7 +74,6 @@ def test_public_keys_are_rejected_as_service_key(key):
         dict(data_source="firebase"),
         dict(data_source="supabase"),
         dict(**{**SUPA, "supabase_url": "http://abc.supabase.co"}),
-        dict(**{**SUPA, "access_token": ""}),  # supabase 모드는 토큰 필수
         dict(**{**SUPA, "access_token": "short"}),
         dict(**{**SUPA, "service_key": ""}),
     ],
@@ -123,6 +122,13 @@ def test_supabase_auth_failure_is_reported_without_key():
     c = TestClient(create_app(Settings(**SUPA), transport=transport), headers={"Authorization": f"Bearer {TOKEN}"})
     r = c.get("/api/devices")
     assert r.status_code == 502 and "secret 키" in r.json()["detail"] and SECRET not in r.text
+
+
+def test_supabase_mode_without_token_is_open():
+    """내부망 전제: 토큰을 비우면 바로 보인다."""
+    c = TestClient(create_app(Settings(**{**SUPA, "access_token": ""})))
+    assert c.get("/").status_code == 200
+    assert _config_from(c)["dataSource"] == "supabase"
 
 
 def test_sample_mode_token_is_optional_but_enforced_when_set():

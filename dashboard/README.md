@@ -11,11 +11,11 @@ python -m venv .venv
 .venv/Scripts/python -m server
 ```
 
-브라우저에서 http://127.0.0.1:8765/ 를 연다. `.env`가 없으면 브라우저에서 생성하는 **샘플 데이터**로 바로 보인다. `DASHBOARD_DATA_SOURCE=supabase`면 서버가 secret 키로 **실제 Supabase**를 조회하고, 화면은 접근 토큰(`/?token=…`)이 있어야 열린다([Supabase 연결](#supabase-연결)).
+브라우저에서 http://127.0.0.1:8765/ 를 연다. `.env`가 없으면 브라우저에서 생성하는 **샘플 데이터**로 바로 보인다. `DASHBOARD_DATA_SOURCE=supabase`면 서버가 secret 키로 **실제 Supabase**를 조회한다([Supabase 연결](#supabase-연결)). 내부망 전제라 기본은 토큰 없이 바로 열린다.
 
 ## 범위
 
-- 로그인 화면 없음. 비인증 접근 차단(SYS-SEC-01)은 대시보드 접근 토큰(`DASHBOARD_ACCESS_TOKEN`)으로 판단. Supabase 는 anon 정책이 없어 publishable 키로는 아무것도 읽을 수 없음
+- 로그인 화면 없음. **내부망 전제**로 기본은 토큰 없이 조회. 외부에 열 때는 `DASHBOARD_ACCESS_TOKEN` 을 설정해 비인증 접근을 막는다(SYS-SEC-01). Supabase 는 anon 정책이 없어 publishable 키로는 아무것도 읽을 수 없음
 - 이벤트 목록: 기간, 장치, 위반 유형 필터, `occurred_at` 내림차순
 - 이벤트 상세: 증거 이미지(Signed URL), bbox 오버레이, 사람별 helmet/vest 상태와 신뢰도, 시간 정보(`occurred_at_source` 표시)
 - 같은 프레임의 다른 위반: 같은 `frame_id` 이벤트를 상세 화면에 링크로 표시하고 이미지 위에 점선 bbox로 겹쳐 그림
@@ -44,7 +44,7 @@ python -m venv .venv
 | 데이터 접근 | `js/data-source.js` 어댑터(`sample` / `supabase`) | UI는 어댑터 인터페이스만 사용. `supabase` 는 대시보드 서버 `/api`(`server/supabase_api.py`)를 부르고, 서버가 secret 키로 Supabase 를 조회 |
 | 실시간 갱신 | 선택(상단 "실시간" 토글). Supabase 모드는 서버 폴링(`ingested_at` 커서, 기본 15초) — Realtime 은 브라우저에 키가 필요해 쓰지 않음 | 기본은 꺼짐. 새 이벤트는 바로 끼워 넣지 않고 "새 이벤트 N건 보기"로 알림 |
 | 딥링크 | `#event=<event_id>` | 특정 이벤트 링크 공유 |
-| 접근 제어 | 접근 토큰 → httpOnly 쿠키(12시간) | 로그인 화면 없이 토큰으로 판단(SYS-SEC-01). API 는 `Authorization: Bearer` 도 허용 |
+| 접근 제어 | 기본 없음(내부망 전제). 선택: 접근 토큰 → httpOnly 쿠키(12시간) | 외부 공개 시 `DASHBOARD_ACCESS_TOKEN` 으로 차단(SYS-SEC-01). API 는 `Authorization: Bearer` 도 허용 |
 | 가데이터 | `seed/`(Python)가 생성해 cloud-sync 와 같은 규칙으로 업로드 | 대시보드가 실제 Supabase 통신으로 동작하는지 확인(I-5) |
 | 호스팅 | 미정 | Supabase 프로젝트 확정 후 결정 |
 
@@ -138,7 +138,7 @@ PowerShell에서는 `VAR=값 명령` 대신 `$env:DASHBOARD_RELOAD="true"; .venv
 | `LOG_LEVEL` | `INFO` | uvicorn 로그 레벨 |
 | `DASHBOARD_DATA_SOURCE` | `sample` | `sample` 또는 `supabase` |
 | `SUPABASE_URL` | — | `supabase` 모드 필수, `https://` |
-| `DASHBOARD_ACCESS_TOKEN` | — | `supabase` 모드 필수, 16자 이상. 샘플 모드에서도 설정하면 적용 |
+| `DASHBOARD_ACCESS_TOKEN` | — | (선택) 비우면 토큰 없이 바로 보임(내부망 전제). 설정 시 16자 이상, 모든 모드에 적용 |
 | `SUPABASE_SERVICE_KEY` | — | `supabase` 모드 필수. secret(`sb_secret_…`) 키 값(`.env`, 커밋 금지). RLS 를 우회해 테이블·버킷을 읽는다. publishable/anon 키면 시작 거부 |
 | `SUPABASE_EVENTS_TABLE` | `ppe_events` | 조회 테이블 |
 | `SUPABASE_STORAGE_BUCKET` | `ppe-evidence` | 증거 이미지 버킷 |
@@ -187,14 +187,9 @@ cd dashboard
 DASHBOARD_DATA_SOURCE=supabase
 SUPABASE_URL=https://<project-ref>.supabase.co
 SUPABASE_SERVICE_KEY=<sb_secret_… 키>
-DASHBOARD_ACCESS_TOKEN=<아래 명령 결과>
 ```
 
-```bash
-.venv/Scripts/python -c "import secrets; print(secrets.token_urlsafe(32))"
-```
-
-그다음 `http://127.0.0.1:8765/?token=<DASHBOARD_ACCESS_TOKEN>` 으로 한 번 연다(이후 12시간 쿠키).
+서버를 띄우고 `http://<서버 IP>:8765/` 를 열면 바로 보인다. 외부에 열어야 하면 `DASHBOARD_ACCESS_TOKEN`(16자 이상)을 추가하고 `/?token=<값>` 으로 한 번 연다(이후 12시간 쿠키).
 
 secret 키로 DB 에 접근되는지만 먼저 확인(서버 실행 불필요, `.env` 의 `SUPABASE_URL`·`SUPABASE_SERVICE_KEY` 사용):
 
@@ -207,7 +202,7 @@ secret 키로 DB 에 접근되는지만 먼저 확인(서버 실행 불필요, `
 서버를 띄운 뒤 API 로 확인:
 
 ```bash
-curl -H "Authorization: Bearer <DASHBOARD_ACCESS_TOKEN>" http://127.0.0.1:8765/api/devices
+curl http://127.0.0.1:8765/api/devices            # 토큰을 설정했다면 -H "Authorization: Bearer <토큰>"
 ```
 
 `[]` 또는 장치 목록이면 정상. `502 … secret 키` 면 키 문제, `502 … PGRST205` 면 schema.sql 미실행.
@@ -232,7 +227,7 @@ curl -H "Authorization: Bearer <DASHBOARD_ACCESS_TOKEN>" http://127.0.0.1:8765/a
 | 재시도 | 408/429/5xx·네트워크 → 백오프(`Retry-After` 우선), 400/422 → 재시도 안 함, 401/403 → 즉시 중단 |
 | Storage 용량 | 같은 JPEG 가 `event_id` 경로마다 따로 저장된다 → 용량 ≈ **이벤트 수 × JPEG 크기**(프레임 수가 아님). 요약의 "증거 프레임" 타일로 이벤트 수와 실제 프레임 수 차이를 볼 수 있다 |
 | 대시보드 조회 | 서버가 secret 키로 `select`: `occurred_at` gte/lt, `device_id=in.(…)`, `violation_types=ov.{…}`, `order=occurred_at.desc`, `offset/limit` + `Prefer: count=exact`. 이미지는 `POST /storage/v1/object/sign/…`(기본 120초) |
-| 접근 | 브라우저 → 대시보드 서버: 접근 토큰. 서버·cloud-sync·seed → Supabase: secret 키. publishable 키로는 접근 불가 |
+| 접근 | 브라우저 → 대시보드 서버: 내부망(선택적으로 접근 토큰). 서버·cloud-sync·seed → Supabase: secret 키. publishable 키로는 접근 불가 |
 
 미결 사항(TODO):
 - 장치 목록: 지금은 최근 1000행에서 추출 → 장치 테이블/뷰가 생기면 교체
