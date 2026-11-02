@@ -88,10 +88,7 @@ class Settings:
 
 
 def read_service_key(env):
-    """SUPABASE_SERVICE_KEY(.env). SUPABASE_SERVICE_KEY_FILE 이 있으면 그 파일이 우선(운영/Docker). seed·cloud-sync 와 같은 이름."""
-    path = (env.get("SUPABASE_SERVICE_KEY_FILE") or "").strip()
-    if path and Path(path).is_file():
-        return Path(path).read_text(encoding="utf-8").strip()
+    """.env/환경변수의 SUPABASE_SERVICE_KEY (seed 와 같은 이름)."""
     return (env.get("SUPABASE_SERVICE_KEY") or "").strip()
 
 

@@ -138,9 +138,7 @@ def test_security_headers(client):
     assert "frame-ancestors 'none'" in h["content-security-policy"]
 
 
-def test_settings_from_env(tmp_path):
-    key_file = tmp_path / "service_key"
-    key_file.write_text(SECRET + "\n", encoding="utf-8")
+def test_settings_from_env():
     s = Settings.from_env(
         {
             "DASHBOARD_BIND_ADDR": "0.0.0.0",
@@ -148,7 +146,7 @@ def test_settings_from_env(tmp_path):
             "DASHBOARD_RELOAD": "true",
             "DASHBOARD_DATA_SOURCE": "SUPABASE",
             "SUPABASE_URL": "https://abc.supabase.co/",
-            "SUPABASE_SERVICE_KEY_FILE": str(key_file),
+            "SUPABASE_SERVICE_KEY": SECRET,
             "DASHBOARD_ACCESS_TOKEN": TOKEN,
         }
     )

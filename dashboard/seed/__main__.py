@@ -5,7 +5,7 @@
     .venv/Scripts/python -m seed --count 10 --out seed-out      # 업로드 없이 파일로만 생성
 
 업로드 순서: Storage(x-upsert: false, 409 시 해시 비교) → ppe_events upsert(on_conflict=event_id, ignore-duplicates).
-쓰기 키: .env 의 SUPABASE_SERVICE_KEY (SUPABASE_SERVICE_KEY_FILE 이 있으면 그 파일 우선).
+쓰기 키: .env 의 SUPABASE_SERVICE_KEY.
 대시보드 서버도 같은 키로 조회하지만 브라우저로는 내려보내지 않는다.
 """
 
@@ -32,9 +32,6 @@ class SeedError(RuntimeError):
 
 
 def _service_key():
-    path = os.environ.get("SUPABASE_SERVICE_KEY_FILE", "").strip()
-    if path and Path(path).is_file():
-        return Path(path).read_text(encoding="utf-8").strip()
     key = os.environ.get("SUPABASE_SERVICE_KEY", "").strip()
     if not key:
         raise SeedError(".env 에 SUPABASE_SERVICE_KEY(dev 프로젝트의 secret 키)가 필요합니다.")

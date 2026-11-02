@@ -140,7 +140,6 @@ PowerShell에서는 `VAR=값 명령` 대신 `$env:DASHBOARD_RELOAD="true"; .venv
 | `SUPABASE_URL` | — | `supabase` 모드 필수, `https://` |
 | `DASHBOARD_ACCESS_TOKEN` | — | `supabase` 모드 필수, 16자 이상. 샘플 모드에서도 설정하면 적용 |
 | `SUPABASE_SERVICE_KEY` | — | `supabase` 모드 필수. secret(`sb_secret_…`) 키 값(`.env`, 커밋 금지). RLS 를 우회해 테이블·버킷을 읽는다. publishable/anon 키면 시작 거부 |
-| `SUPABASE_SERVICE_KEY_FILE` | — | (선택) 키를 파일로 둘 때 경로. 설정되면 `SUPABASE_SERVICE_KEY` 보다 우선 |
 | `SUPABASE_EVENTS_TABLE` | `ppe_events` | 조회 테이블 |
 | `SUPABASE_STORAGE_BUCKET` | `ppe-evidence` | 증거 이미지 버킷 |
 | `DASHBOARD_SIGNED_URL_EXPIRES_S` | `120` | Signed URL 만료(초) |
