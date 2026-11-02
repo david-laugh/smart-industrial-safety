@@ -4,7 +4,7 @@ from edge.inference.association import (MISSING, UNKNOWN, WORN, AssocParams, Per
 
 W, H = 640, 480
 PRM = AssocParams(person_min_confidence=0.5, worn_min_confidence=0.5, missing_min_confidence=0.5,
-                  min_person_box_px=160, helmet_region=(0.0, 0.25), vest_region=(0.2, 0.7),
+                  min_person_box_px=160.0, helmet_region=(0.0, 0.25), vest_region=(0.2, 0.7),
                   assoc_min_ioa=0.5, edge_margin_px=2.0)
 
 # 이미지 안에 온전히 보이는 사람: x 100~220, y 40~400 (높이 360)
@@ -35,11 +35,30 @@ def test_missing_class_detection():
     assert r["vest"] == {"status": MISSING, "confidence": 0.55}
 
 
-def test_head_cut_at_top_is_unknown():
-    p = (100.0, 0.0, 220.0, 360.0)  # 위로 잘림
+def test_head_cut_at_top_is_unknown_but_vest_judged():
+    p = (100.0, 0.0, 220.0, 360.0)  # 위쪽만 잘림, 조끼 영역은 이미지 안
     r = one([PersonBox(p, 0.9)], [])[0]
     assert r["helmet"] == {"status": UNKNOWN, "confidence": None}
-    assert r["vest"] == {"status": UNKNOWN, "confidence": None}  # 영역 위치 불확실
+    assert r["vest"] == {"status": MISSING, "confidence": 0.9}
+
+
+def test_top_and_bottom_cut_both_unknown():
+    p = (100.0, 0.0, 220.0, 480.0)
+    r = one([PersonBox(p, 0.9)], [])[0]
+    assert r["helmet"]["status"] == UNKNOWN and r["vest"]["status"] == UNKNOWN
+
+
+def test_min_box_ratio_default_and_px_override():
+    from edge.inference.config import InferenceConfig
+    cfg = InferenceConfig.from_env({})
+    assert cfg.min_person_box_ratio == 0.33 and cfg.min_person_box_px is None
+    prm = AssocParams.from_config(cfg)
+    p150 = PersonBox((100.0, 40.0, 220.0, 190.0), 0.9)   # 150px < 0.33*480=158.4
+    p170 = PersonBox((100.0, 40.0, 220.0, 210.0), 0.9)   # 170px
+    assert one([p150], [], prm)[0]["helmet"]["status"] == UNKNOWN
+    assert one([p170], [], prm)[0]["helmet"]["status"] == MISSING
+    cfg = InferenceConfig.from_env({"INFERENCE_MIN_PERSON_BOX_PX": "100", "INFERENCE_MIN_PERSON_BOX_RATIO": "0.9"})
+    assert one([p150], [], AssocParams.from_config(cfg))[0]["helmet"]["status"] == MISSING  # px 우선
 
 
 def test_torso_out_of_frame_is_unknown():
@@ -103,7 +122,7 @@ def test_overlapping_persons_ppe_assigned_to_one_only():
     a = PersonBox((100.0, 50.0, 250.0, 450.0), 0.9)
     b = PersonBox((180.0, 60.0, 330.0, 460.0), 0.9)
     helmet = PPEBox("helmet", (190.0, 55.0, 240.0, 110.0), 0.85)  # 두 사람 영역 모두 중심 포함, A 와 겹침이 더 큼
-    assigned = assign_ppe([a, b], [helmet], PRM)
+    assigned = assign_ppe([a, b], [helmet], PRM, H)
     assert assigned[0] == [helmet] and assigned[1] == []
     ra, rb = one([a, b], [helmet])
     assert ra["helmet"]["status"] == WORN

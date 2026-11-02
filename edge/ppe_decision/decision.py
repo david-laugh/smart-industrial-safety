@@ -15,8 +15,8 @@
   window_start_epoch_s = floor(occurred_epoch_s / PPE_DEDUP_WINDOW_S) * PPE_DEDUP_WINDOW_S
   억제: 같은 (device_id, 셀, 위반유형) 이 마지막 발행 후 PPE_DEDUP_WINDOW_S 초 안이면 재발행하지 않음
   (버킷 경계를 넘어도 창 안이면 억제). 같은 키도 재발행하지 않음.
-- 같은 프레임의 여러 위반자는 이벤트 1건(violations 배열)으로 묶는다.
-  decision.dedup_key 는 스키마상 문자열 1개이므로 person_index 가 가장 작은 위반자의 키를 쓴다.
+- 위반자마다 별도 이벤트(자기 event_id, 자기 dedup_key, violations 1개, event_id 별 증거 JPEG).
+  dedup_key 형식이 pos 하나를 포함하므로 계약 의도와 일치한다.
 - 결정적 동작: 같은 입력 시퀀스 → 같은 판정. event_id, decided_at 만 다르며 둘 다 주입 가능.
 - 시간: capture_ts_utc 가 있고 |capture − gateway_received| ≤ TIME_MAX_DEVICE_SKEW_MS → DEVICE_SNTP,
   아니면 GATEWAY_RECEIVED. 모든 시각은 'Z' 접미사 UTC.
@@ -185,8 +185,12 @@ class PPEDecision:
 
     # ------------------------------------------------------------------
     def update(self, edge_frame: Dict[str, Any], inference_result: Dict[str, Any], jpeg: bytes
-               ) -> Optional[Dict[str, Any]]:
-        """프레임 1장 처리. 위반이 확정되고 dedup 억제되지 않으면 ppe-event dict 를 반환(publisher 가 있으면 spool 게시)."""
+               ) -> List[Dict[str, Any]]:
+        """프레임 1장 처리. 확정·비억제 위반자마다 ppe-event 1건(violations 1개)을 만들어 리스트로 반환.
+
+        위반이 없으면 []. publisher 가 있으면 이벤트마다 spool 에 게시(JPEG 는 event_id 별로 저장).
+        이벤트 순서는 person_index 오름차순(결정적).
+        """
         device_id = inference_result["device_id"]
         if inference_result["frame_id"] != edge_frame["frame_id"]:
             raise ValueError("edge_frame/inference_result frame_id mismatch")
@@ -199,9 +203,8 @@ class PPEDecision:
         window_start = int(occ_s // w * w) if w > 0 else int(occ_s)
         self._prune_emitted(occ_s)
 
-        violations = []
-        pending: List[Tuple[Tuple[str, Cell, str], str]] = []
-        frames_considered = 1
+        candidates = []
+        seen = set()
         for p in sorted(persons, key=lambda q: q["person_index"]):
             cell = cells[p["person_index"]]
             types = self._confirmed(device_id, cell, p)
@@ -213,63 +216,65 @@ class PPEDecision:
             last = self._emitted.get(sup_key)
             if last is not None and (last[1] == dkey or 0 <= occ_s - last[0] < w):
                 continue
-            if any(k == sup_key for k, _ in pending):  # 같은 프레임·같은 셀 중복 사람
+            if sup_key in seen:  # 같은 프레임·같은 셀의 중복 사람
                 continue
-            pending.append((sup_key, dkey))
-            frames_considered = max(frames_considered, len(self._windows[(device_id, cell)]))
-            violations.append({
-                "person_index": p["person_index"],
-                "track_id": p.get("track_id"),
-                "bbox": dict(p["bbox"]),
-                "helmet": dict(p["helmet"]),
-                "vest": dict(p["vest"]),
-                "violation_types": types,
-            })
-        if not violations:
-            return None
-        violations = violations[:64]
+            seen.add(sup_key)
+            candidates.append((p, types, sup_key, dkey, len(self._windows[(device_id, cell)])))
 
-        event_id = self.id_fn()
+        events: List[Dict[str, Any]] = []
+        if not candidates:
+            return events
         dt = parse_utc(occ)
         img_size = jpeg_size(jpeg)
         if img_size is None:
             img_size = (inference_result["image_size"]["width"], inference_result["image_size"]["height"])
-        event = {
-            "schema_version": self.cfg.schema_version,
-            "event_id": event_id,
-            "event_type": "PPE_VIOLATION",
-            "device_id": device_id,
-            "frame_id": edge_frame["frame_id"],
-            "boot_id": edge_frame["boot_id"],
-            "frame_seq": edge_frame["frame_seq"],
-            "timestamps": {
-                "occurred_at_utc": occ,
-                "occurred_at_source": occ_src,
-                "capture_ts_utc": edge_frame.get("capture_ts_utc"),
-                "mcu_uptime_ms": edge_frame["mcu_uptime_ms"],
-                "gateway_received_at_utc": edge_frame["gateway_received_at_utc"],
-                "gateway_clock_synced": edge_frame["gateway_clock_synced"],
-                "decided_at_utc": format_utc(self.now_fn()),
-            },
-            "violations": violations,
-            "image": {
-                "image_path": f"images/{dt:%Y}/{dt:%m}/{dt:%d}/{event_id}.jpg",
-                "content_type": "image/jpeg",
-                "byte_length": len(jpeg),
-                "sha256": hashlib.sha256(jpeg).hexdigest(),
-                "width": int(img_size[0]),
-                "height": int(img_size[1]),
-            },
-            "model": dict(inference_result["model"]),
-            "decision": {
-                "policy_version": self.cfg.policy_version,
-                "dedup_key": pending[0][1],
-                "dedup_window_s": w,
-                "frames_considered": frames_considered,
-            },
-        }
-        if self.publisher is not None:
-            self.publisher.publish(event, jpeg)  # 실패 시 예외 → dedup 상태 미기록(다음 프레임에서 재시도)
-        for sup_key, dkey in pending:
+        jpeg_sha = hashlib.sha256(jpeg).hexdigest()
+        for p, types, sup_key, dkey, frames_considered in candidates:
+            event_id = self.id_fn()
+            event = {
+                "schema_version": self.cfg.schema_version,
+                "event_id": event_id,
+                "event_type": "PPE_VIOLATION",
+                "device_id": device_id,
+                "frame_id": edge_frame["frame_id"],
+                "boot_id": edge_frame["boot_id"],
+                "frame_seq": edge_frame["frame_seq"],
+                "timestamps": {
+                    "occurred_at_utc": occ,
+                    "occurred_at_source": occ_src,
+                    "capture_ts_utc": edge_frame.get("capture_ts_utc"),
+                    "mcu_uptime_ms": edge_frame["mcu_uptime_ms"],
+                    "gateway_received_at_utc": edge_frame["gateway_received_at_utc"],
+                    "gateway_clock_synced": edge_frame["gateway_clock_synced"],
+                    "decided_at_utc": format_utc(self.now_fn()),
+                },
+                "violations": [{
+                    "person_index": p["person_index"],
+                    "track_id": p.get("track_id"),
+                    "bbox": dict(p["bbox"]),
+                    "helmet": dict(p["helmet"]),
+                    "vest": dict(p["vest"]),
+                    "violation_types": types,
+                }],
+                "image": {
+                    "image_path": f"images/{dt:%Y}/{dt:%m}/{dt:%d}/{event_id}.jpg",
+                    "content_type": "image/jpeg",
+                    "byte_length": len(jpeg),
+                    "sha256": jpeg_sha,
+                    "width": int(img_size[0]),
+                    "height": int(img_size[1]),
+                },
+                "model": dict(inference_result["model"]),
+                "decision": {
+                    "policy_version": self.cfg.policy_version,
+                    "dedup_key": dkey,
+                    "dedup_window_s": w,
+                    "frames_considered": frames_considered,
+                },
+            }
+            if self.publisher is not None:
+                # 실패 시 예외 → 이 이벤트의 dedup 상태 미기록(다음 프레임에서 재발행). 앞서 게시된 이벤트는 유지.
+                self.publisher.publish(event, jpeg)
             self._emitted[sup_key] = (occ_s, dkey)
-        return event
+            events.append(event)
+        return events

@@ -67,16 +67,23 @@ def decider(tmp_path=None, **kw):
                        now_fn=lambda: datetime(2026, 11, 2, 2, 0, 0, tzinfo=timezone.utc), id_fn=fixed_ids())
 
 
-def run(d, seq_persons, **kw):
+def run_all(d, seq_persons, **kw):
+    """프레임별 이벤트 리스트의 리스트."""
     out = []
     for i, ps in enumerate(seq_persons):
         ef, res = frame(i, ps, **kw)
-        ev = d.update(ef, res, JPEG)
-        if ev is not None:
+        evs = d.update(ef, res, JPEG)
+        assert cc.errors("inference-result", res) == []
+        for ev in evs:
             assert cc.errors("ppe-event", ev) == [], cc.errors("ppe-event", ev)
-            assert cc.errors("inference-result", res) == []
-        out.append(ev)
+            assert len(ev["violations"]) == 1
+        out.append(evs)
     return out
+
+
+def run(d, seq_persons, **kw):
+    """프레임별 첫 이벤트 또는 None (단일 위반자 시나리오용)."""
+    return [evs[0] if evs else None for evs in run_all(d, seq_persons, **kw)]
 
 
 # ---------------------------------------------------------------- 평활화 / UNKNOWN
@@ -122,15 +129,31 @@ def test_both_violation_types_sorted():
     assert evs[2]["violations"][0]["violation_types"] == ["HELMET_MISSING", "VEST_MISSING"]
 
 
-def test_multiple_violators_in_one_event():
+def test_multiple_violators_get_separate_events(tmp_path):
     a = person(0, "MISSING", "WORN", bbox=(0.05, 0.1, 0.20, 0.95))
     b = person(1, "WORN", "MISSING", bbox=(0.70, 0.1, 0.90, 0.95))
     c = person(2, "WORN", "WORN", bbox=(0.40, 0.1, 0.55, 0.95))
-    evs = run(decider(), [[a, b, c]] * 3)
-    assert [e is None for e in evs] == [True, True, False]
-    vs = evs[2]["violations"]
-    assert [(v["person_index"], v["violation_types"]) for v in vs] == [(0, ["HELMET_MISSING"]), (1, ["VEST_MISSING"])]
-    assert evs[2]["decision"]["dedup_key"].startswith("cam-line-a-01|pos:r2c0|HELMET_MISSING|")
+    frames_evs = run_all(decider(tmp_path), [[a, b, c]] * 3)
+    assert [len(x) for x in frames_evs] == [0, 0, 2]
+    e0, e1 = frames_evs[2]
+    assert e0["event_id"] != e1["event_id"]
+    assert [(v["person_index"], v["violation_types"]) for v in e0["violations"]] == [(0, ["HELMET_MISSING"])]
+    assert [(v["person_index"], v["violation_types"]) for v in e1["violations"]] == [(1, ["VEST_MISSING"])]
+    assert e0["decision"]["dedup_key"].startswith("cam-line-a-01|pos:r2c0|HELMET_MISSING|")
+    assert e1["decision"]["dedup_key"].startswith("cam-line-a-01|pos:r2c3|VEST_MISSING|")
+    for e in (e0, e1):  # 증거 JPEG 는 event_id 별로 저장
+        assert (tmp_path / e["image"]["image_path"]).read_bytes() == JPEG
+        assert (tmp_path / "spool" / "incoming" / f"{e['event_id']}.json").exists()
+    assert len(list((tmp_path / "spool" / "incoming").iterdir())) == 2
+
+
+def test_per_person_dedup_is_independent():
+    a = person(0, "MISSING", "WORN", bbox=(0.05, 0.1, 0.20, 0.95))
+    b = person(1, "WORN", "MISSING", bbox=(0.70, 0.1, 0.90, 0.95))
+    seq = [[a]] * 3 + [[a, b]] * 3   # b 는 나중에 등장 → a 억제 중에도 b 는 별도 발행
+    frames_evs = run_all(decider(), seq)
+    assert [len(x) for x in frames_evs] == [0, 0, 1, 0, 0, 1]
+    assert frames_evs[5][0]["violations"][0]["person_index"] == 1
 
 
 # ---------------------------------------------------------------- dedup
@@ -155,7 +178,7 @@ def test_dedup_key_format_and_window_start():
     for i in range(3):
         ef, res = frame(i, [person(0, "MISSING", "WORN", bbox=(0.21, 0.10, 0.45, 0.95))],
                         t=start + timedelta(seconds=i * 0.5))
-        evs.append(d.update(ef, res, JPEG))
+        evs.append((d.update(ef, res, JPEG) or [None])[0])
     assert evs[2]["decision"]["dedup_key"] == "cam-line-a-01|pos:r2c1|HELMET_MISSING|1793582610"
 
 
@@ -165,7 +188,7 @@ def test_dedup_suppresses_across_bucket_boundary():
     n = 0
     for i in range(20):
         ef, res = frame(i, [person(0, "MISSING", "WORN")], t=start + timedelta(seconds=i * 0.5))
-        n += d.update(ef, res, JPEG) is not None
+        n += len(d.update(ef, res, JPEG))
     assert n == 1
 
 
@@ -190,7 +213,7 @@ def test_devices_are_independent():
     for i in range(3):
         for dev in ("cam-a-01", "cam-b-01"):
             ef, res = frame(i, [person(0, "MISSING", "WORN")], device=dev)
-            n += d.update(ef, res, JPEG) is not None
+            n += len(d.update(ef, res, JPEG))
     assert n == 2
 
 
@@ -207,13 +230,14 @@ def test_deterministic_same_sequence_same_decisions():
     a = person(0, "MISSING", "WORN", bbox=(0.05, 0.1, 0.20, 0.95))
     b = person(1, "WORN", "MISSING", bbox=(0.70, 0.1, 0.90, 0.95))
     seq = ([[a, b]] * 4 + [[a]] * 3 + [[]] * 2 + [[b]] * 4) * 6
-    e1 = run(decider(), seq)
-    e2 = run(decider(), seq)
+    e1 = run_all(decider(), seq)
+    e2 = run_all(decider(), seq)
     assert e1 == e2  # id/시각 주입 시 완전 동일
     d3 = PPEDecision(DecisionConfig(), publish=False)  # 실제 uuid7/현재 시각
-    e3 = run(d3, seq)
-    assert [e is None for e in e1] == [e is None for e in e3]
-    assert [_strip(x) for x in e1 if x] == [_strip(x) for x in e3 if x]
+    e3 = run_all(d3, seq)
+    assert [len(x) for x in e1] == [len(x) for x in e3]
+    assert [_strip(x) for f in e1 for x in f] == [_strip(x) for f in e3 for x in f]
+    assert sum(len(x) for x in e1) >= 4
 
 
 # ---------------------------------------------------------------- 시간 규칙
@@ -272,7 +296,7 @@ def test_spool_failure_does_not_record_dedup(tmp_path):
     for f in (tmp_path / "spool" / "tmp").iterdir():
         f.unlink()
     ef, res = frame(3, [person(0, "MISSING", "WORN")])
-    assert d.update(ef, res, JPEG) is not None  # 실패한 이벤트는 억제되지 않고 다음 프레임에서 발행
+    assert len(d.update(ef, res, JPEG)) == 1  # 실패한 이벤트는 억제되지 않고 다음 프레임에서 발행
 
 
 # ---------------------------------------------------------------- 기타

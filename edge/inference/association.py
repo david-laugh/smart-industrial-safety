@@ -3,7 +3,8 @@
 순수 함수(입력: 픽셀 좌표 박스)라서 합성 박스로 단위 테스트할 수 있다.
 
 규칙 (값은 InferenceConfig 로 조정, 모델 카드에 기록):
-1. 판정 불가 사람: person_confidence < person_min_confidence 또는 박스 높이(px) < min_person_box_px
+1. 판정 불가 사람: person_confidence < person_min_confidence 또는 박스 높이 < 최소 높이
+   (min_person_box_px 가 있으면 그 px, 없으면 min_person_box_ratio × 이미지 높이)
    → helmet/vest 모두 UNKNOWN, confidence=null. PPE 박스 할당 경쟁에도 참여하지 않는다
    (저신뢰 중복 사람 박스가 실제 작업자의 PPE 박스를 가져가 MISSING 이 되는 것을 막기 위함).
 2. 영역: 사람 박스 높이 기준 위에서부터 helmet_region(기본 0~25%), vest_region(기본 20~70%), 가로는 사람 박스 전체.
@@ -17,8 +18,9 @@
        * 임계값 미만이라도 착용 클래스 검출이 연관돼 있으면 → UNKNOWN(애매함, 보수적)
        * 부위 영역이 이미지 경계에 닿지 않고(가림/잘림 없음) → MISSING,
          confidence = person_confidence (부재 근거이므로 사람 검출 신뢰도를 사용)
-       * 영역이 이미지 경계에 닿음(머리 위로 잘림, 몸통이 프레임 밖) → UNKNOWN
-     vest 는 사람 박스가 위/아래로 잘리면 영역 위치 자체가 불확실하므로 UNKNOWN.
+       * 영역이 이미지 경계에 닿음 → UNKNOWN. 부위별로 판단한다:
+           helmet: 위쪽 또는 좌/우가 잘리면 UNKNOWN (아래쪽 잘림은 무관)
+           vest  : 아래쪽 또는 좌/우가 잘리면 UNKNOWN (위쪽만 잘린 경우는 정상 판정)
 """
 from __future__ import annotations
 
@@ -50,7 +52,8 @@ class AssocParams:
     person_min_confidence: float = 0.5
     worn_min_confidence: float = 0.5
     missing_min_confidence: float = 0.5
-    min_person_box_px: float = 160
+    min_person_box_ratio: float = 0.33
+    min_person_box_px: Optional[float] = None
     helmet_region: Tuple[float, float] = (0.0, 0.25)
     vest_region: Tuple[float, float] = (0.2, 0.7)
     assoc_min_ioa: float = 0.5
@@ -62,6 +65,7 @@ class AssocParams:
             person_min_confidence=cfg.person_min_confidence,
             worn_min_confidence=cfg.ppe_worn_min_confidence,
             missing_min_confidence=cfg.ppe_missing_min_confidence,
+            min_person_box_ratio=cfg.min_person_box_ratio,
             min_person_box_px=cfg.min_person_box_px,
             helmet_region=cfg.helmet_region,
             vest_region=cfg.vest_region,
@@ -89,8 +93,14 @@ def _center_in(b: Box, r: Box) -> bool:
     return r[0] <= cx <= r[2] and r[1] <= cy <= r[3]
 
 
-def is_judgeable(p: PersonBox, prm: AssocParams) -> bool:
-    return p.score >= prm.person_min_confidence and (p.xyxy[3] - p.xyxy[1]) >= prm.min_person_box_px
+def min_box_height(prm: AssocParams, img_h: int) -> float:
+    if prm.min_person_box_px is not None:
+        return float(prm.min_person_box_px)
+    return prm.min_person_box_ratio * img_h
+
+
+def is_judgeable(p: PersonBox, prm: AssocParams, img_h: int) -> bool:
+    return p.score >= prm.person_min_confidence and (p.xyxy[3] - p.xyxy[1]) >= min_box_height(prm, img_h)
 
 
 def _item_visible(item: str, person: Box, img_w: int, img_h: int, prm: AssocParams) -> bool:
@@ -99,18 +109,18 @@ def _item_visible(item: str, person: Box, img_w: int, img_h: int, prm: AssocPara
     x1, y1, x2, y2 = person
     if x1 <= m or x2 >= img_w - m:          # 좌/우로 잘림 → 부위 일부가 프레임 밖일 수 있음
         return False
-    if y1 <= m:                              # 위로 잘림(머리 잘림) → 영역 위치 불확실
+    if item == "helmet" and y1 <= m:         # 위로 잘림(머리 잘림)
         return False
     if item == "vest" and y2 >= img_h - m:   # 아래로 잘림 → 박스 높이 기준 몸통 영역 불확실
         return False
     return True
 
 
-def assign_ppe(persons: Sequence[PersonBox], ppe: Sequence[PPEBox], prm: AssocParams
+def assign_ppe(persons: Sequence[PersonBox], ppe: Sequence[PPEBox], prm: AssocParams, img_h: int
                ) -> Dict[int, List[PPEBox]]:
     """PPE 박스를 판정 가능한 사람 1명에게만 할당. 반환: {person_idx: [PPEBox]}"""
     out: Dict[int, List[PPEBox]] = {i: [] for i in range(len(persons))}
-    judgeable = [i for i, p in enumerate(persons) if is_judgeable(p, prm)]
+    judgeable = [i for i, p in enumerate(persons) if is_judgeable(p, prm, img_h)]
     for d in ppe:
         item = "helmet" if d.role in ITEM_ROLES["helmet"] else "vest" if d.role in ITEM_ROLES["vest"] else None
         if item is None:
@@ -166,10 +176,10 @@ def _c(x: float) -> float:
 def associate(persons: Sequence[PersonBox], ppe: Sequence[PPEBox], img_w: int, img_h: int,
               prm: AssocParams) -> List[Dict]:
     """사람별 결과(dict) 리스트. bbox 는 0~1 정규화(원본 기준, 좌상단 원점)."""
-    assigned = assign_ppe(persons, ppe, prm)
+    assigned = assign_ppe(persons, ppe, prm, img_h)
     results = []
     for i, p in enumerate(persons):
-        if is_judgeable(p, prm):
+        if is_judgeable(p, prm, img_h):
             helmet = item_status("helmet", p, assigned[i], img_w, img_h, prm)
             vest = item_status("vest", p, assigned[i], img_w, img_h, prm)
         else:

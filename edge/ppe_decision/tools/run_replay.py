@@ -28,11 +28,8 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 from edge.inference import contract_check as cc  # noqa: E402
-from edge.inference.api import InferenceEngine  # noqa: E402
-from edge.inference.config import InferenceConfig  # noqa: E402
-from edge.ppe_decision.config import DecisionConfig  # noqa: E402
-from edge.ppe_decision.decision import PPEDecision, format_utc  # noqa: E402
-from edge.ppe_decision.spool import SpoolPublisher  # noqa: E402
+from edge.ppe_decision.decision import format_utc  # noqa: E402
+from edge.ppe_decision.pipeline import PPEPipeline  # noqa: E402
 from edge.ppe_decision.uuid7 import uuid7  # noqa: E402
 
 
@@ -80,10 +77,10 @@ def main() -> None:
     args = ap.parse_args()
 
     tmpl = json.loads(Path(args.template).read_text(encoding="utf-8"))
-    icfg = InferenceConfig.from_env({**dict(__import__("os").environ), "INFERENCE_MODEL_PATH": args.model_path})
-    engine = InferenceEngine(icfg)
-    dcfg = DecisionConfig.from_env({**dict(__import__("os").environ), "EVENT_DATA_ROOT": args.data_root})
-    decision = PPEDecision(dcfg, publisher=SpoolPublisher(dcfg.data_root))
+    env = {**dict(__import__("os").environ), "INFERENCE_MODEL_PATH": args.model_path,
+           "EVENT_DATA_ROOT": args.data_root}
+    pipeline = PPEPipeline.from_env(env)
+    icfg = pipeline.engine.cfg
 
     start = datetime.fromisoformat(args.start.replace("Z", "+00:00"))
     stages = {k: [] for k in ("decode_ms", "preprocess_ms", "inference_ms", "postprocess_ms",
@@ -111,26 +108,27 @@ def main() -> None:
         cc.validate("edge-frame", ef)
 
         t0 = time.perf_counter()
-        res = engine.infer(ef, jpeg)
-        t1 = time.perf_counter()
-        ev = decision.update(ef, res, jpeg)
+        evs = pipeline.process(ef, jpeg)
         t2 = time.perf_counter()
+        res = pipeline.last_inference_result
+        t1 = t0 + sum(res["timing"].values()) / 1000.0  # infer 구간(근사) — decision_ms 계산용
         cc.validate("inference-result", res)
-        if ev is not None:
+        for ev in evs:
             cc.validate("ppe-event", ev)
             events.append(ev)
         t3 = time.perf_counter()
 
         for k in ("decode_ms", "preprocess_ms", "inference_ms", "postprocess_ms"):
             stages[k].append(res["timing"][k])
-        stages["infer_total_ms"].append((t1 - t0) * 1000)
-        stages["decision_ms"].append((t2 - t1) * 1000)  # spool 게시(fsync) 포함
+        stages["infer_total_ms"].append((t1 - t0) * 1000)       # 단계 합(디코드~후처리)
+        stages["decision_ms"].append(max(0.0, (t2 - t1) * 1000))  # 나머지(판정 + spool fsync, 근사)
+        stages.setdefault("pipeline_total_ms", []).append((t2 - t0) * 1000)
         stages["validate_ms"].append((t3 - t2) * 1000)
         for p in res["persons"]:
             key = f"{p['helmet']['status']}/{p['vest']['status']}"
             status_counts[key] = status_counts.get(key, 0) + 1
         n += 1
-        if ev is not None:
+        for ev in evs:
             print(f"[frame {seq:3d} t={t_off:6.2f}s] EVENT {ev['event_id']} "
                   f"{[(v['person_index'], v['violation_types']) for v in ev['violations']]} key={ev['decision']['dedup_key']}")
 
