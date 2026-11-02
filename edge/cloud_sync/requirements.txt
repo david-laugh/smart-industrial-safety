@@ -1,0 +1,4 @@
+# cloud-sync 런타임 (edge.event_store + edge.cloud_sync). HTTP 는 표준 라이브러리 urllib.
+# 버전 하한만 — 고정은 Pi/Docker Python 버전 확정 후.
+jsonschema>=4.18
+referencing>=0.30
