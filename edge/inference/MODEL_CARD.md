@@ -105,13 +105,16 @@ NO-Safety Vest 최고점 ≥0.58. 원경 인물에 붙은 노이즈 Safety Vest 
 |---|---|
 | 세트 1 | AI 생성 건설현장 영상(`ppe_safety_test_fixed.mp4`, 1280x720, 15 fps, 10초)에서 2 fps 로 20프레임 |
 | 세트 2 | 걸어오는 작업자 영상(`Worker_walking_at_construction_site_f72b27d7.mp4`, 1280x720, 24 fps, 10초, 고정 카메라)에서 5 fps 로 50프레임. 주 작업자 1명(정답 helmet=MISSING, vest=WORN) + 뒤쪽 원경 작업자(평가 제외, 50/50 UNKNOWN) |
+| 세트 3 | 4인 대화 영상(`talking_38e93215.mp4`, 원본 `Construction_workers_talking_at_…_38e93215.mp4`, 1280x720, 24 fps, 10초, 고정 카메라, 사람 높이 70~80%)에서 5 fps 로 50프레임. 왼쪽부터 ① 야구모자+조끼(MISSING/WORN) ② 안전모+조끼 ③ 안전모+조끼 ④ 안전모+형광 노란 일반 티셔츠(WORN/MISSING) |
 | 변형 | 원본 / ESP32 모사(640x480 리사이즈 + OpenCV JPEG 품질 40) |
 | 구성 | 주 작업자 3명(착용+착용, 안전모 미착용, 조끼 미착용) + 원경 인물 1~3명 |
 | 결과 1 | 주 작업자 3명의 helmet/vest 상태가 원본·ESP32 모사 모두 20/20 프레임에서 기대값과 일치, 원경 인물은 UNKNOWN |
 | 결과 2 (ESP32 모사, 박스 0.25) | helmet MISSING 정밀도 1.00 / 재현율 0.76 (MISSING 38, UNKNOWN 9, WORN 3), vest WORN 1.00 / 0.98. 리플레이 2/5/24 fps 모두 HELMET_MISSING 1건 |
+| 결과 3 (ESP32 모사) | ① helmet MISSING 재현율 0.60(WORN 20프레임), ④ vest MISSING 재현율 0.72(WORN 13프레임), ②③ 및 나머지 항목 1.00, MISSING 정밀도 1.00. 리플레이 2/5/24 fps 모두 이벤트 2건(①HELMET, ④VEST), ②③ 오탐 0, 연관 오류 0 |
+| 결과 3 (원본 1280x720) | ④ vest MISSING 재현율 0.00(WORN 40, UNKNOWN 10) → VEST_MISSING 이벤트 누락(이벤트 1건) |
 | 라벨 | 정식 라벨 CSV 미작성. `tools/eval_status.py --make-template` 로 템플릿 생성 후 사람이 채워 정밀도/재현율 산출 예정 |
 
-**평가 한계**: 10초 고정 장면 2개, 프레임 간 상관이 매우 높음 → 실질 독립 표본이 적다. 실제 ESP32 카메라 화질·화각,
+**평가 한계**: 10초 고정 장면 3개, 프레임 간 상관이 매우 높음 → 실질 독립 표본이 적다. 실제 ESP32 카메라 화질·화각,
 가림, 야간, 다양한 PPE 색상, 마스크/모자 등 혼동 요소는 평가되지 않았다. 위 결과를 정확도 지표로 인용하지 말 것.
 `Hardhat` 은 원경 인물(작음)에서도 높은 점수(최대 0.91)로 검출되므로 작은 박스 판정 불가 규칙이 중요하다.
 
@@ -120,6 +123,11 @@ NO-Safety Vest 최고점 ≥0.58. 원경 인물에 붙은 노이즈 Safety Vest 
   실제 안전모 착용자의 Hardhat 최저점 0.70 과 겹친다.)
 - 세트 2 의 helmet MISSING 은 대부분 '검출 없음' 규칙에서 나온다(NO-Hardhat ≥0.5 는 50프레임 중 2프레임).
   원거리 판정은 미착용 클래스보다 Hardhat 미검출에 의존한다.
+- **야구모자를 Hardhat 으로, 형광 노란 티셔츠를 Safety Vest 로 프레임 단위 오검출.** 임계값으로 분리 불가
+  (ESP32 모사: 실제 Hardhat 최저 0.53 vs 모자 오검출 최고 0.86, 실제 조끼 최저 0.55 vs 티셔츠 오검출 최고 0.68).
+  평활화로 이벤트는 정확하나 첫 이벤트가 지연된다(세트 3, 5 fps: HELMET_MISSING 2.42s).
+- **원본 해상도(1280x720)에서는 티셔츠 조끼 미착용 이벤트를 놓친다**(NO-Safety Vest 최고 0.48, vest WORN 40/50).
+  ESP32 모사(640x480 q40)에서는 검출됨 → **카메라 해상도·화질을 바꾸면 재검증 필요.**
 
 ## 6. 재현
 
