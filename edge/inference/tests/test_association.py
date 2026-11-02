@@ -51,10 +51,10 @@ def test_top_and_bottom_cut_both_unknown():
 def test_min_box_ratio_default_and_px_override():
     from edge.inference.config import InferenceConfig
     cfg = InferenceConfig.from_env({})
-    assert cfg.min_person_box_ratio == 0.33 and cfg.min_person_box_px is None
+    assert cfg.min_person_box_ratio == 0.25 and cfg.min_person_box_px is None
     prm = AssocParams.from_config(cfg)
-    p150 = PersonBox((100.0, 40.0, 220.0, 190.0), 0.9)   # 150px < 0.33*480=158.4
-    p170 = PersonBox((100.0, 40.0, 220.0, 210.0), 0.9)   # 170px
+    p150 = PersonBox((100.0, 40.0, 220.0, 150.0), 0.9)   # 110px < 0.25*480=120
+    p170 = PersonBox((100.0, 40.0, 220.0, 170.0), 0.9)   # 130px
     assert one([p150], [], prm)[0]["helmet"]["status"] == UNKNOWN
     assert one([p170], [], prm)[0]["helmet"]["status"] == MISSING
     cfg = InferenceConfig.from_env({"INFERENCE_MIN_PERSON_BOX_PX": "100", "INFERENCE_MIN_PERSON_BOX_RATIO": "0.9"})

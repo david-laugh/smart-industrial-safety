@@ -37,6 +37,8 @@ events = decision.update(edge_frame, inference_result, jpeg)
 
 1. **같은 사람**: 추적기 없음. bbox 중심을 `PPE_DEDUP_GRID`(가로x세로, 기본 4x4)로 양자화한 셀 `pos:r{행}c{열}`.
    격자 경계 떨림을 막기 위해, 해당 장치에서 추적 중인 셀의 마지막 중심과 `PPE_CELL_STICKY_DIST`(격자 단위, 기본 0.5) 이내면 그 셀을 재사용.
+   helmet·vest 가 모두 UNKNOWN 인 사람(원경·저신뢰)은 셀 배정·창·sticky 중심에서 제외(같은 셀 평균 중심이 끌려 위반자가 새 셀로 분리되는 것 방지).
+   단 `PPE_UNKNOWN_IS_VIOLATION=true` 면 포함.
 2. **평활화**: (장치, 셀)별 최근 `PPE_DECISION_WINDOW_FRAMES`(5) 프레임. 사람이 없는 프레임은 ABSENT(미착용으로 세지 않음).
    항목별 MISSING 수 ≥ `PPE_DECISION_MIN_MISSING_FRAMES`(3) **이고 현재 프레임도 MISSING** 이면 확정(증거 이미지에 위반이 보이도록).
    UNKNOWN 은 `PPE_UNKNOWN_IS_VIOLATION=true` 일 때만 MISSING 으로 센다. 같은 셀에 여러 명이면 MISSING > WORN > UNKNOWN.
@@ -86,6 +88,6 @@ events = decision.update(edge_frame, inference_result, jpeg)
 ## 남은 이슈
 
 - **추적기 부재**: 사람이 격자 셀을 크게 이동하면 평활화 창이 끊기고 새 셀에서 다시 시작(그동안 확정 지연, 30초 안 재발행 가능).
-- **박스 기준·임계값 재조정 필요**: 추론 측 최소 박스(0.33)·임계값(0.5)은 테스트 영상 1개 기준.
+- **박스 기준·임계값 재조정 필요**: 추론 측 최소 박스(0.25)·임계값(0.5)은 테스트 영상 2개 기준.
 - **ESP32 persons 필드**: 스키마 1.1.0 대기.
 - 같은 프레임의 여러 이벤트는 같은 JPEG 내용을 event_id 별 파일로 중복 저장(디스크 사용량 증가, 계약상 의도된 동작).
