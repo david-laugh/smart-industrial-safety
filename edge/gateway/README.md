@@ -136,7 +136,7 @@ curl -sS http://<pi-address>:8080/healthz
 ## 테스트
 
 ```bash
-pip install -r edge/gateway/requirements.txt pytest httpx
+pip install -r edge/gateway/requirements-dev.txt
 python -m pytest edge/gateway/tests -q
 ```
 
