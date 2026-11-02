@@ -1,0 +1,4 @@
+# 대시보드 개발/테스트 전용 (런타임 의존성 아님 — 대시보드 자체는 정적 파일)
+jsonschema>=4.23      # contracts/*.schema.json 으로 목업 데이터 검증
+pytest>=8.3
+playwright>=1.48      # 헤드리스 브라우저 E2E (설치 후: python -m playwright install chromium)
