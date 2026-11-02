@@ -42,12 +42,22 @@ def base_url():
 
 
 @pytest.fixture(scope="session")
-def supabase_base_url():
-    """DASHBOARD_DATA_SOURCE=supabase 로 띄운 앱. Supabase 는 tests/fake_supabase.py 대역으로 응답."""
-    from tests.fake_supabase import ANON_KEY, FAKE_URL
+def fake_supabase():
+    from tests.fake_supabase import FakeSupabase
 
-    s = Settings(data_source="supabase", supabase_url=FAKE_URL, supabase_anon_key=ANON_KEY)
-    server, thread, url = _serve(create_app(s))
+    return FakeSupabase()
+
+
+@pytest.fixture(scope="session")
+def supabase_base_url(fake_supabase):
+    """DASHBOARD_DATA_SOURCE=supabase 로 띄운 앱. 서버 → Supabase 요청은 tests/fake_supabase.py 대역이 응답."""
+    import httpx
+
+    from tests.fake_supabase import ACCESS_TOKEN, FAKE_URL, SERVICE_KEY
+
+    s = Settings(data_source="supabase", supabase_url=FAKE_URL, service_key=SERVICE_KEY, access_token=ACCESS_TOKEN,
+                 live_interval_s=1)
+    server, thread, url = _serve(create_app(s, transport=httpx.MockTransport(fake_supabase.handle)))
     yield url
     server.should_exit = True
     thread.join(timeout=5)

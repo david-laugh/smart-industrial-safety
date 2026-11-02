@@ -79,85 +79,55 @@
     };
   }
 
-  // ---------------- Supabase ----------------
-  // cloud/README.md 설계(ppe_events select, ppe-evidence Signed URL)를 전제로 한다.
-  // 개발용 테이블/버킷/RLS: dashboard/seed/schema.sql
+  // ---------------- Supabase (대시보드 서버 경유) ----------------
+  // 브라우저는 Supabase 키를 갖지 않는다. 대시보드 서버(server/supabase_api.py)가 secret 키로 대신 조회한다.
+  // 접근 토큰은 httpOnly 쿠키로 서버가 확인한다(SYS-SEC-01). 개발용 테이블/버킷: dashboard/seed/schema.sql
 
-  function loadScript(src) {
-    return new Promise((resolve, reject) => {
-      const s = document.createElement("script");
-      s.src = src;
-      s.onload = resolve;
-      s.onerror = () => reject(new Error("스크립트를 불러오지 못했습니다: " + src));
-      document.head.appendChild(s);
-    });
+  async function api(path, params) {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(params || {})) {
+      for (const item of [].concat(v)) if (item !== undefined && item !== null && item !== "") qs.append(k, item);
+    }
+    const res = await fetch("api/" + path + (qs.toString() ? "?" + qs : ""), { credentials: "same-origin" });
+    if (res.status === 401) throw new Error("접근 토큰이 필요합니다. 관리자에게 받은 주소(/?token=…)로 다시 여세요.");
+    if (res.status === 404) return null;
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.detail || "서버 오류 " + res.status);
+    return body;
   }
 
-  async function createSupabaseSource() {
-    if (!cfg.supabaseUrl || !cfg.supabaseAnonKey) {
-      throw new Error("supabaseUrl / supabaseAnonKey 가 설정되지 않았습니다 (config.local.js).");
-    }
-    if (!window.supabase) await loadScript(cfg.supabaseJsUrl);
-    // 로그인 세션 없이 토큰(anon key)만으로 요청한다. 접근 허용 여부는 서버 RLS가 토큰의 role로 판단.
-    const sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, {
-      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-    });
+  function filterParams(f) {
+    return { from: f.from, to: f.to, device: f.deviceIds, type: f.violationTypes };
+  }
 
-    function applyFilter(q, f) {
-      if (f.from) q = q.gte("occurred_at", f.from);
-      if (f.to) q = q.lt("occurred_at", f.to);
-      if (f.deviceIds.length) q = q.in("device_id", f.deviceIds);
-      if (f.violationTypes.length) q = q.overlaps("violation_types", f.violationTypes);
-      return q;
-    }
-
-    function check(res) {
-      if (res.error) throw new Error(res.error.message);
-      return res;
-    }
-
+  function createSupabaseSource() {
     return {
       kind: "supabase",
-      async listDevices() {
-        // TODO(C): 장치 목록 뷰/테이블이 생기면 교체. 지금은 최근 행에서 추출.
-        const res = check(await sb.from(cfg.table).select("device_id").order("occurred_at", { ascending: false }).limit(1000));
-        return Array.from(new Set(res.data.map((r) => r.device_id))).sort();
-      },
-      async listEvents(f, page) {
-        let q = sb.from(cfg.table).select("*", { count: "exact" });
-        q = applyFilter(q, f).order("occurred_at", { ascending: false }).range(page.offset, page.offset + page.limit - 1);
-        const res = check(await q);
-        return { rows: res.data, total: res.count || 0 };
-      },
-      async listStats(f) {
-        // TODO(C): 행이 많아지면 집계 RPC/뷰로 교체. 지금은 경량 컬럼만 최대 5000행 조회.
-        let q = sb.from(cfg.table).select("occurred_at,device_id,violation_types,violation_count,frame_id:event_payload->>frame_id");
-        q = applyFilter(q, f).order("occurred_at", { ascending: false }).limit(5000);
-        const res = check(await q);
-        return res.data;
-      },
-      async getEvent(id) {
-        const res = check(await sb.from(cfg.table).select("*").eq("event_id", id).maybeSingle());
-        return res.data;
-      },
-      async listFrameEvents(frameId) {
-        // TODO(C): 행이 많아지면 (event_payload->>'frame_id') 식 인덱스 추가 검토
-        const res = check(await sb.from(cfg.table).select("*").eq("event_payload->>frame_id", frameId).limit(64));
-        return res.data;
-      },
-      async getSignedImageUrl(row) {
-        const res = check(await sb.storage.from(row.storage_bucket).createSignedUrl(row.storage_path, cfg.signedUrlExpiresSec));
-        return {
-          url: res.data.signedUrl,
-          expiresAt: new Date(Date.now() + cfg.signedUrlExpiresSec * 1000).toISOString(),
-        };
-      },
+      listDevices: () => api("devices"),
+      listEvents: (f, page) => api("events", { ...filterParams(f), offset: page.offset, limit: page.limit }),
+      listStats: (f) => api("stats", filterParams(f)),
+      getEvent: (id) => api("events/" + encodeURIComponent(id)),
+      listFrameEvents: async (frameId) => (await api("frames/" + encodeURIComponent(frameId))) || [],
+      getSignedImageUrl: (row) => api("events/" + encodeURIComponent(row.event_id) + "/image"),
       subscribe(onInsert) {
-        const ch = sb
-          .channel("ppe_events_inserts")
-          .on("postgres_changes", { event: "INSERT", schema: "public", table: cfg.table }, (msg) => onInsert(msg.new))
-          .subscribe();
-        return () => sb.removeChannel(ch);
+        // Realtime 대신 서버 폴링(ingested_at 커서)
+        let cursor = null;
+        let stopped = false;
+        const tick = async () => {
+          try {
+            const res = await api("live", cursor ? { after: cursor } : {});
+            cursor = res.cursor;
+            if (!stopped) res.rows.forEach(onInsert);
+          } catch (err) {
+            console.warn("실시간 확인 실패:", err.message);
+          }
+        };
+        tick();
+        const timer = setInterval(tick, cfg.liveIntervalMs);
+        return () => {
+          stopped = true;
+          clearInterval(timer);
+        };
       },
     };
   }

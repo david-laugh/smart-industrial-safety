@@ -2,6 +2,6 @@
 -r requirements.txt
 jsonschema>=4.23      # contracts/*.schema.json 검증(샘플 데이터·업로드 전 CON-01)
 pytest>=8.3
-httpx>=0.27           # FastAPI TestClient, seed 업로더(Storage/PostgREST)
+# httpx 는 requirements.txt(서버 런타임)에 포함: FastAPI TestClient, seed 업로더도 사용
 pillow>=10.4          # seed 증거 JPEG 생성
 playwright>=1.48      # 헤드리스 브라우저 E2E (설치 후: python -m playwright install chromium)
