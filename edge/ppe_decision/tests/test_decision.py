@@ -93,7 +93,7 @@ def test_confirmed_after_min_missing_frames():
     v = evs[2]["violations"][0]
     assert v["violation_types"] == ["HELMET_MISSING"]
     assert evs[2]["decision"]["frames_considered"] == 3
-    assert evs[2]["decision"]["policy_version"] == "0.0.0"
+    assert evs[2]["decision"]["policy_version"] == "0.1.0"
 
 
 def test_not_enough_missing_frames_no_event():

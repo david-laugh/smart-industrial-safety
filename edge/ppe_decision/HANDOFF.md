@@ -61,7 +61,7 @@ def on_frame_selected(edge_frame: dict, jpeg: bytes) -> None:
  "model":{"name":"yolov8n-ppe-hansung-cho","version":"hf-ac0027b-onnx-op12",
    "sha256":"846b747b01505804e384c16b5136b55754a9e64ec2de5f1fe2d32f3ffee64721",
    "input_width":640,"input_height":640,"runtime":"onnxruntime","runtime_version":"1.31.1"},
- "decision":{"policy_version":"0.0.0","dedup_key":"cam-line-a-01|pos:r2c1|HELMET_MISSING|1793581200",
+ "decision":{"policy_version":"0.1.0","dedup_key":"cam-line-a-01|pos:r2c1|HELMET_MISSING|1793581200",
    "dedup_window_s":30,"frames_considered":3}}
 ```
 
@@ -127,7 +127,7 @@ INFERENCE_PPE_MIN_CONFIDENCE=0.5
 INFERENCE_MIN_PERSON_BOX_PX=
 
 # ---- PPE Decision (인터페이스 4) ----
-PPE_POLICY_VERSION=0.0.0
+PPE_POLICY_VERSION=0.1.0
 PPE_DECISION_WINDOW_FRAMES=5
 PPE_DECISION_MIN_MISSING_FRAMES=3
 PPE_UNKNOWN_IS_VIOLATION=false
@@ -136,7 +136,7 @@ PPE_DEDUP_GRID=4x4
 TIME_MAX_DEVICE_SKEW_MS=2000
 ```
 
-> `PPE_POLICY_VERSION` 은 코드 기본값이 `.env.example` 과 같은 `0.0.0` 이다. 첫 정책 확정 시 올릴 것을 제안(예: `0.1.0`).
+> `PPE_POLICY_VERSION` 코드 기본값은 `0.1.0`(B 판정 로직 확정본). `.env.example` 의 `0.0.0` 을 `0.1.0` 으로 바꿔 주세요(D).
 
 ### 6.2 B 가 새로 추가한 변수 (모두 선택, 비우면 기본값)
 
@@ -166,7 +166,7 @@ PPE_EVENT_SCHEMA_VERSION=1.0.0                  # ppe-event schema_version
 
 개발 전용: `CONTRACTS_DIR`(계약 검증 헬퍼의 스키마 위치, 기본 저장소 `contracts/`).
 
-## 7. 판정 정책 요약 (policy 0.0.0)
+## 7. 판정 정책 요약 (policy 0.1.0)
 
 - 추론: 단일 모델(Person/Hardhat/NO-Hardhat/Safety Vest/NO-Safety Vest), 클래스별 NMS, 사람 박스 상단 0~25% 안전모 / 20~70% 조끼 영역에 연관.
 - 판정 불가(UNKNOWN): 사람 점수 < 0.5, 박스 높이 < 이미지 높이 × 0.25, 부위가 이미지 경계에서 잘림.

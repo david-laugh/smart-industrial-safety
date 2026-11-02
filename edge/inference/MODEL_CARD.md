@@ -72,7 +72,9 @@ ultralytics/onnx 버전이 달라지면 같은 `.pt` 에서도 sha256 이 달라
 
 학습 imgsz 가 640 이라 416/320 은 NO-Hardhat 점수가 크게 떨어진다 → **640 채택**(Pi 5 지연 측정 후 재검토).
 
-## 4. 사람-PPE 연관과 판정 (런타임 `association.py`)
+## 4. 사람-PPE 연관과 판정 (런타임 `association.py`, 판정 정책 `PPE_POLICY_VERSION=0.1.0`)
+
+정책 0.1.0 = 아래 연관·상태 규칙(박스 기준 0.25, IoA 동점 시 가로 중심 우선) + `edge/ppe_decision` 의 평활화(5프레임 중 3)·B-lite·유형 단위 dedup(30초).
 
 | 파라미터 | 기본값 | 환경변수 |
 |---|---|---|
